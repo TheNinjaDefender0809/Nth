@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nth — Prototype</title>
+<style>
+  :root{
+    --bg:#0a0a0f; --wall:#2a2f45; --floor:#12141f; --player:#4fd1c5; --ai:#ff4d6d;
+    --echo:rgba(79,209,197,0.35); --plate:#f6c453; --door:#8b5cf6; --exit:#34d399; --text:#e6e8f0;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
+  #app{display:flex;flex-direction:column;height:100%;}
+  #hud{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:14px;letter-spacing:0.5px;}
+  #hud .title{font-weight:700;color:var(--player);}
+  #timer{font-variant-numeric:tabular-nums;font-size:20px;font-weight:700;}
+  #timer.low{color:var(--ai);}
+  #status{font-size:12px;opacity:0.75;min-height:16px;}
+  #stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0;}
+  canvas{background:var(--floor);max-width:100%;max-height:100%;touch-action:none;border-radius:8px;}
+  #controls{display:flex;justify-content:space-between;align-items:flex-end;padding:14px 18px 18px;gap:12px;}
+  #joyzone{width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,0.06);position:relative;touch-action:none;}
+  #joystick{width:46px;height:46px;border-radius:50%;background:var(--player);position:absolute;left:32px;top:32px;transition:left .05s,top .05s;}
+  .btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:var(--text);
+       padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;letter-spacing:0.5px;}
+  .btn:active{background:rgba(255,255,255,0.18);}
+  #resetBtn{background:rgba(255,77,109,0.15);border-color:rgba(255,77,109,0.4);}
+  #overlay{position:absolute;inset:0;background:rgba(5,5,10,0.92);display:none;flex-direction:column;
+           align-items:center;justify-content:center;text-align:center;padding:24px;border-radius:8px;}
+  #overlay h2{margin:0 0 8px;font-size:24px;}
+  #overlay p{margin:0 0 18px;opacity:0.8;font-size:14px;max-width:280px;}
+  #echoBadge{position:absolute;top:10px;right:10px;font-size:11px;background:rgba(79,209,197,0.15);
+             border:1px solid rgba(79,209,197,0.4);padding:4px 8px;border-radius:6px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <div class="title">NTH</div>
+    <div id="timer">60</div>
+  </div>
+  <div id="status">Reach the exit. Both plates must be held at once to open the door.</div>
+  <div id="stage">
+    <canvas id="c" width="480" height="352"></canvas>
+    <div id="echoBadge"></div>
+    <div id="overlay">
+      <h2 id="ovTitle"></h2>
+      <p id="ovText"></p>
+      <button class="btn" id="ovBtn" style="background:var(--player);color:#04201d;">Continue</button>
+    </div>
+  </div>
+  <div id="controls">
+    <div id="joyzone"><div id="joystick"></div></div>
+    <button class="btn" id="resetBtn">RESET</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const CELL = 32, COLS = 15, ROWS = 11;
+  const canvas = document.getElementById('c');
+  canvas.width = COLS*CELL; canvas.height = ROWS*CELL;
+  const ctx = canvas.getContext('2d');
+
+  // 1 = wall, 0 = floor. Fixed layout so Echo recordings stay valid across loops.
+  const maze = [
+   "111111111111111",
+   "100000001000001",
+   "101110101011101",
+   "101000101010001",
+   "101011101010111",
+   "100010001000001",
+   "111010111110101",
+   "100010000010101",
+   "101110111010101",
+   "100000100000001",
+   "111111111111111",
+  ].map(r=>r.split('').map(Number));
+
+  const isWall = (cx,cy)=> cx<0||cy<0||cx>=COLS||cy>=ROWS || maze[cy][cx]===1;
+
+  const PLAYER_R = 9, AI_R = 10;
+  const spawn = {x:1.5*CELL, y:1.5*CELL};
+  const exit = {x:13.5*CELL, y:9.5*CELL};
+  const plateA = {cx:3, cy:7, held:false};
+  const plateB = {cx:11, cy:1, held:false};
+  const door = {cx1:7, cy1:6, cx2:7, cy2:6}; // single door cell, unlocks maze[6][7]
+  let doorOpen = false;
+
+  const aiPath = [ // patrol waypoints (cell centers)
+    {x:7.5*CELL,y:1.5*CELL}, {x:11.5*CELL,y:1.5*CELL}, {x:13.5*CELL,y:3.5*CELL},
+    {x:7.5*CELL,y:3.5*CELL}, {x:7.5*CELL,y:1.5*CELL}
+  ];
+
+  let state, player, ai, echoes, recording, runStart, timeLeft, TOTAL_TIME=60, gameOver;
+  let echoCount = 0;
+  let echoesCaught = [];
+
+  // --- player behaviour tracking (feeds AI prediction) ---
+  // 8-direction histogram with exponential decay so it reflects RECENT tendency, not all-time average
+  let dirHist = new Array(8).fill(0);
+  function trackMovement(mx, my, dt){
+    for(let i=0;i<8;i++) dirHist[i] *= 0.995;
+    if(Math.hypot(mx,my) < 0.15) return;
+    const angle = Math.atan2(my, mx);
+    const idx = ((Math.round((angle+Math.PI)/(Math.PI/4)) % 8) + 8) % 8;
+    dirHist[idx] += dt;
+  }
+  function dominantDirVector(){
+    let maxI = 0;
+    for(let i=1;i<8;i++) if(dirHist[i] > dirHist[maxI]) maxI = i;
+    if(dirHist[maxI] < 0.05) return {x:0,y:0}; // no strong pattern yet - don't fake confidence
+    const angle = maxI*(Math.PI/4) - Math.PI;
+    return {x:Math.cos(angle), y:Math.sin(angle)};
+  }
+
+  function resetRun(keepEcho){
+    player = {x:spawn.x, y:spawn.y, vx:0, vy:0};
+    ai = {x:aiPath[0].x, y:aiPath[0].y, wp:0, state:'patrol', target:null, lastSeen:null, predictClock:0};
+    recording = [];
+    echoesCaught = new Array(echoes.length).fill(false);
+    runStart = performance.now();
+    timeLeft = TOTAL_TIME;
+    doorOpen = false;
+    gameOver = false;
+    document.getElementById('overlay').style.display = 'none';
+    setStatus(echoes.length ? `Loop ${echoes.length+1}. Both plates must be held at once.` : 'Reach the exit. Both plates must be held at once to open the door.');
+    updateEchoBadge();
+  }
+
+  function startFresh(){
+    echoes = [];
+    resetRun(false);
+  }
+
+  function setStatus(t){ document.getElementById('status').textContent = t; }
+  function updateEchoBadge(){
+    const b = document.getElementById('echoBadge');
+    b.textContent = echoes.length ? `Echoes: ${echoes.length}` : '';
+  }
+
+  // --- Input: joystick ---
+  let joyVec = {x:0,y:0};
+  const joyzone = document.getElementById('joyzone');
+  const joystick = document.getElementById('joystick');
+  let joyActive = false, joyId = null, joyCenter = {x:0,y:0};
+
+  function joyStart(e){
+    const t = e.changedTouches ? e.changedTouches[0] : e;
+    joyActive = true; joyId = t.identifier ?? 'mouse';
+    const r = joyzone.getBoundingClientRect();
+    joyCenter = {x:r.left+r.width/2, y:r.top+r.height/2};
+    e.preventDefault();
+  }
+  function joyMove(e){
+    if(!joyActive) return;
+    const touches = e.changedTouches ? Array.from(e.changedTouches) : [e];
+    const t = touches.find(t=>(t.identifier ?? 'mouse')===joyId);
+    if(!t) return;
+    let dx = t.clientX - joyCenter.x, dy = t.clientY - joyCenter.y;
+    const max = 34, dist = Math.hypot(dx,dy);
+    if(dist>max){ dx = dx/dist*max; dy = dy/dist*max; }
+    joystick.style.left = (32+dx)+'px'; joystick.style.top = (32+dy)+'px';
+    joyVec = {x:dx/max, y:dy/max};
+    e.preventDefault();
+  }
+  function joyEnd(e){
+    joyActive = false; joyVec = {x:0,y:0};
+    joystick.style.left='32px'; joystick.style.top='32px';
+  }
+  joyzone.addEventListener('touchstart', joyStart);
+  joyzone.addEventListener('touchmove', joyMove);
+  joyzone.addEventListener('touchend', joyEnd);
+  joyzone.addEventListener('mousedown', joyStart);
+  window.addEventListener('mousemove', joyMove);
+  window.addEventListener('mouseup', joyEnd);
+
+  // keyboard fallback
+  const keys = {};
+  window.addEventListener('keydown', e=>keys[e.key.toLowerCase()]=true);
+  window.addEventListener('keyup', e=>keys[e.key.toLowerCase()]=false);
+
+  document.getElementById('resetBtn').addEventListener('click', ()=>{
+    if(gameOver) return;
+    finalizeEcho();
+    resetRun(true);
+  });
+
+  function finalizeEcho(){
+    if(recording.length>4 && echoes.length<3){
+      echoes.push(recording.slice());
+      echoCount++;
+    }
+  }
+
+  // --- collision helper: circle vs grid walls ---
+  function tryMove(entity, dx, dy, r){
+    let nx = entity.x+dx, ny = entity.y+dy;
+    const cells = [[nx-r,ny-r],[nx+r,ny-r],[nx-r,ny+r],[nx+r,ny+r]];
+    let blocked = false;
+    for(const [px,py] of cells){
+      const cx = Math.floor(px/CELL), cy = Math.floor(py/CELL);
+      if(cy===door.cy1 && cx===door.cx1 && doorOpen) continue;
+      if(isWall(cx,cy)){ blocked = true; break; }
+    }
+    if(!blocked){ entity.x = nx; entity.y = ny; return; }
+    // try sliding along one axis
+    let nx2 = entity.x+dx;
+    let blockedX = false;
+    for(const [,py] of [[0,entity.y-r],[0,entity.y+r]]){
+      const cx = Math.floor(nx2>entity.x?(nx2+r):(nx2-r)/1)/1;
+    }
+    // simpler axis-separated retry
+    let tryX = entity.x+dx, tryY = entity.y;
+    let okX = true;
+    for(const oy of [-r,r]){ const cx=Math.floor((tryX+(dx>0?r:-r))/CELL), cy=Math.floor((tryY+oy)/CELL);
+      if(cy===door.cy1 && cx===door.cx1 && doorOpen) continue;
+      if(isWall(cx,cy)) okX=false; }
+    if(okX) entity.x = tryX;
+    let tryY2 = entity.y+dy;
+    let okY = true;
+    for(const ox of [-r,r]){ const cx=Math.floor((entity.x+ox)/CELL), cy=Math.floor((tryY2+(dy>0?r:-r))/CELL);
+      if(cy===door.cy1 && cx===door.cx1 && doorOpen) continue;
+      if(isWall(cx,cy)) okY=false; }
+    if(okY) entity.y = tryY2;
+  }
+
+  function lineOfSight(x1,y1,x2,y2){
+    const steps = 24;
+    for(let i=0;i<=steps;i++){
+      const x = x1+(x2-x1)*i/steps, y = y1+(y2-y1)*i/steps;
+      const cx = Math.floor(x/CELL), cy = Math.floor(y/CELL);
+      if(cy===door.cy1 && cx===door.cx1 && doorOpen) continue;
+      if(isWall(cx,cy)) return false;
+    }
+    return true;
+  }
+
+  function updateAI(dt){
+    const dx = player.x-ai.x, dy = player.y-ai.y;
+    const dist = Math.hypot(dx,dy);
+    const canSee = dist < 190 && lineOfSight(ai.x,ai.y,player.x,player.y);
+
+    if(canSee){
+      ai.state='chase'; ai.lastSeen={x:player.x,y:player.y};
+    } else if(ai.state==='chase'){
+      // just lost sight - don't just walk to where they were, cut off where they're LIKELY going,
+      // based on this player's recent movement pattern. Falls back to last-seen if no clear pattern yet.
+      const dv = dominantDirVector();
+      const PREDICT_DIST = 95;
+      ai.target = {x:ai.lastSeen.x+dv.x*PREDICT_DIST, y:ai.lastSeen.y+dv.y*PREDICT_DIST};
+      ai.state = (dv.x||dv.y) ? 'predict' : 'search';
+      ai.predictClock = 1.3;
+    }
+
+    let tx,ty,speed;
+    if(ai.state==='chase'){
+      tx=player.x; ty=player.y; speed=76;
+    } else if(ai.state==='predict'){
+      tx=ai.target.x; ty=ai.target.y; speed=84; // faster - it's cutting the corner, not following
+      ai.predictClock -= dt;
+      if(ai.predictClock<=0 || Math.hypot(ai.x-tx,ai.y-ty)<10){ ai.state='search'; }
+    } else if(ai.state==='search' && ai.lastSeen){
+      tx=ai.lastSeen.x; ty=ai.lastSeen.y; speed=60;
+      if(Math.hypot(ai.x-tx,ai.y-ty)<10){ ai.state='patrol'; ai.lastSeen=null; }
+    } else {
+      const wp = aiPath[ai.wp];
+      tx=wp.x; ty=wp.y; speed=44;
+      if(Math.hypot(ai.x-tx,ai.y-ty)<8){ ai.wp=(ai.wp+1)%aiPath.length; }
+    }
+    const d = Math.hypot(tx-ai.x,ty-ai.y)||1;
+    tryMove(ai, (tx-ai.x)/d*speed*dt, (ty-ai.y)/d*speed*dt, AI_R);
+  }
+
+  function checkPlate(p, x, y){
+    const cellCx = p.cx*CELL+CELL/2, cellCy = p.cy*CELL+CELL/2;
+    return Math.hypot(x-cellCx, y-cellCy) < CELL*0.55;
+  }
+
+  function endRun(win, msg){
+    gameOver = true;
+    const ov = document.getElementById('overlay');
+    document.getElementById('ovTitle').textContent = win ? 'Escaped' : 'Caught';
+    document.getElementById('ovText').textContent = msg;
+    ov.style.display='flex';
+    document.getElementById('ovBtn').onclick = ()=>{ finalizeEcho(); resetRun(true); };
+  }
+
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min((now-last)/1000, 0.05); last = now;
+    if(!gameOver){
+      timeLeft -= dt;
+      const elapsed = (now-runStart)/1000;
+
+      // player movement
+      let mx = joyVec.x, my = joyVec.y;
+      if(keys['w']||keys['arrowup']) my=-1;
+      if(keys['s']||keys['arrowdown']) my=1;
+      if(keys['a']||keys['arrowleft']) mx=-1;
+      if(keys['d']||keys['arrowright']) mx=1;
+      const mag = Math.hypot(mx,my);
+      if(mag>0.15){
+        const speed=88;
+        tryMove(player, mx/mag*speed*dt, my/mag*speed*dt, PLAYER_R);
+      }
+      trackMovement(mx, my, dt);
+      recording.push({t:elapsed, x:player.x, y:player.y});
+
+      updateAI(dt);
+
+      // echo playback - the AI can catch an Echo mid-replay. A caught Echo stops contributing
+      // to the level (won't hold its plate) for the rest of this loop - it's visible, not silent.
+      const activeEchoPositions = [];
+      for(let ei=0; ei<echoes.length; ei++){
+        const rec = echoes[ei];
+        if(elapsed > rec[rec.length-1].t) continue;
+        let seg = rec[0];
+        for(let i=0;i<rec.length-1;i++){
+          if(rec[i].t<=elapsed && rec[i+1].t>=elapsed){ seg = rec[i]; break; }
+        }
+        if(!echoesCaught[ei] && Math.hypot(seg.x-ai.x, seg.y-ai.y) < AI_R+PLAYER_R){
+          echoesCaught[ei] = true;
+          setStatus(`Echo #${ei+1} was caught — it won't reach its plate this loop.`);
+        }
+        if(!echoesCaught[ei]) activeEchoPositions.push(seg);
+      }
+
+      // plate check (player or any echo standing there)
+      const allActors = [player, ...activeEchoPositions];
+      plateA.held = allActors.some(a=>checkPlate(plateA,a.x,a.y));
+      plateB.held = allActors.some(a=>checkPlate(plateB,a.x,a.y));
+      doorOpen = plateA.held && plateB.held;
+
+      // AI catch check
+      if(Math.hypot(player.x-ai.x, player.y-ai.y) < PLAYER_R+AI_R){
+        endRun(false, 'The AI caught you. This attempt still became an Echo — use it.');
+      }
+      // exit check
+      else if(Math.hypot(player.x-exit.x, player.y-exit.y) < 14){
+        endRun(true, `Escaped in ${Math.max(0,60-Math.ceil(timeLeft))}s using ${echoes.length} echo(es).`);
+      }
+      // timeout
+      else if(timeLeft<=0){
+        endRun(false, "Time's up. This attempt still became an Echo — use it.");
+      }
+
+      const timerEl = document.getElementById('timer');
+      timerEl.textContent = Math.max(0,Math.ceil(timeLeft));
+      timerEl.classList.toggle('low', timeLeft<15);
+
+      render(activeEchoPositions);
+    }
+    requestAnimationFrame(loop);
+  }
+
+  function render(activeEchoPositions){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // maze
+    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
+      if(y===door.cy1 && x===door.cx1){
+        ctx.fillStyle = doorOpen ? 'rgba(139,92,246,0.15)' : '#8b5cf6';
+      } else {
+        ctx.fillStyle = maze[y][x]===1 ? getCss('--wall') : getCss('--floor');
+      }
+      ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+    }
+    // plates
+    drawPlate(plateA); drawPlate(plateB);
+    // exit
+    ctx.fillStyle = getCss('--exit');
+    ctx.beginPath(); ctx.arc(exit.x,exit.y,12,0,7); ctx.fill();
+    // echoes
+    ctx.fillStyle = getCss('--echo');
+    for(const e of activeEchoPositions){
+      ctx.beginPath(); ctx.arc(e.x,e.y,PLAYER_R,0,7); ctx.fill();
+    }
+    // AI vision cone (subtle) - tints stronger orange when it's actively predicting, so the
+    // player can always see WHY it's suddenly cutting them off instead of following
+    ctx.fillStyle = ai.state==='predict' ? 'rgba(246,196,83,0.14)' : 'rgba(255,77,109,0.08)';
+    ctx.beginPath(); ctx.moveTo(ai.x,ai.y); ctx.arc(ai.x,ai.y,190,0,7); ctx.fill();
+    // AI
+    ctx.fillStyle = ai.state==='predict' ? '#f6c453' : getCss('--ai');
+    ctx.beginPath(); ctx.arc(ai.x,ai.y,AI_R,0,7); ctx.fill();
+    // player
+    ctx.fillStyle = getCss('--player');
+    ctx.beginPath(); ctx.arc(player.x,player.y,PLAYER_R,0,7); ctx.fill();
+  }
+  function drawPlate(p){
+    ctx.fillStyle = p.held ? getCss('--plate') : 'rgba(246,196,83,0.35)';
+    const x=p.cx*CELL+CELL/2, y=p.cy*CELL+CELL/2;
+    ctx.beginPath(); ctx.arc(x,y,10,0,7); ctx.fill();
+  }
+  function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+  startFresh();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
