@@ -23,7 +23,7 @@
   #timer.low{color:var(--cop);}
   #status{font-size:12px;opacity:0.8;min-height:16px;padding:0 16px 4px;}
   #stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0;}
-  canvas{background:var(--bg);max-width:100%;max-height:100%;touch-action:none;border-radius:8px;}
+  canvas{display:block;background:var(--bg);width:100%;height:100%;object-fit:contain;touch-action:none;border-radius:8px;}
   #toast{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(192,132,252,0.18);
          border:1px solid rgba(192,132,252,0.5);color:#e9d5ff;padding:5px 14px;border-radius:20px;
          font-size:12px;font-weight:700;letter-spacing:0.5px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
@@ -47,7 +47,7 @@
     <div id="hudRight">
       <div id="keyIcon">🔑</div>
       <div id="lives"></div>
-      <div id="timer">60</div>
+      <div id="timer">75</div>
     </div>
   </div>
   <div id="status">You're a thief with a broken time machine. The cop is still just watching you...</div>
@@ -68,11 +68,11 @@
 
 <script>
 (function(){
-  const CELL=28, COLS=17, ROWS=13;
+  const CELL=28, COLS=22, ROWS=16;
   const canvas = document.getElementById('c');
   canvas.width = COLS*CELL; canvas.height = ROWS*CELL;
   const ctx = canvas.getContext('2d');
-  const PLAYER_R=8, COP_R=9, ROOM_TIME=60, STUN_TIME=2.0, ICE_TIME=3.0, FIRE_TIME=3.0, COP_SLOW_TIME=2.0;
+  const PLAYER_R=8, COP_R=9, ROOM_TIME=75, STUN_TIME=2.0, ICE_TIME=3.0, FIRE_TIME=3.0, COP_SLOW_TIME=2.0;
 
   function mulberry32(a){
     return function(){
@@ -93,15 +93,19 @@
     grid[cy][cx]=0;
     const mainPath = new Set([cy+','+cx]);
     let guard=0;
-    // lower rightward bias (0.42 vs the old 0.55) so the path winds up/down a lot more before
-    // committing toward the exit - a real maze feel instead of a mostly-straight corridor
-    while((cx!==doorOut.x || cy!==doorOut.y) && guard<1500){
+    // deliberate serpentine bias, not just a lowered rightward chance - the walk commits to a
+    // vertical direction for a few steps then flips, which reliably produces S/W shaped routes
+    // instead of leaving curviness to chance (a pure random walk can still come out near-straight)
+    let verticalDir = rng()<0.5 ? 1 : -1;
+    let stepsInDir = 0;
+    while((cx!==doorOut.x || cy!==doorOut.y) && guard<3000){
       guard++;
       let dx=0,dy=0;
-      if(cx<doorOut.x && rng()<0.42) dx=1;
+      if(cx<doorOut.x && rng()<0.3) dx=1;
       else {
-        const dir = Math.floor(rng()*4);
-        if(dir===0) dy=-1; else if(dir===1) dy=1; else if(dir===2) dx=1; else dx=(cx>0?-1:1);
+        stepsInDir++;
+        if(stepsInDir > 3+Math.floor(rng()*3)){ verticalDir*=-1; stepsInDir=0; }
+        dy=verticalDir;
       }
       let nx = Math.max(0, Math.min(COLS-1, cx+dx));
       let ny = Math.max(1, Math.min(ROWS-2, cy+dy));
@@ -118,10 +122,10 @@
     grid[doorOut.y][doorOut.x]=0; mainPath.add(doorOut.y+','+doorOut.x);
     const mainPathArr = Array.from(mainPath).map(s=>{const [y,x]=s.split(',').map(Number); return {x,y};});
     const branchSet = new Set();
-    for(let b=0;b<8;b++){
+    for(let b=0;b<10;b++){
       const start = mainPathArr[Math.floor(rng()*mainPathArr.length)];
       let bx=start.x, by=start.y;
-      let steps=4+Math.floor(rng()*5);
+      let steps=5+Math.floor(rng()*6);
       for(let s=0;s<steps;s++){
         const dir=Math.floor(rng()*4);
         if(dir===0) bx=Math.min(COLS-2,bx+1);
@@ -233,6 +237,45 @@
     return {x:Math.cos(angle), y:Math.sin(angle)};
   }
 
+  // real pathfinding, not just wall-sliding - this is what was causing the cop to visibly
+  // "walk in place": a direct-vector move toward a target on the far side of a wall can get
+  // stuck against a corner with no way to route around it. BFS on the small room grid is cheap
+  // enough to run every frame and guarantees the cop always takes a valid step toward its target.
+  function cellOf(px,py){ return {x:Math.floor(px/CELL), y:Math.floor(py/CELL)}; }
+  function bfsPath(start,end){
+    if(isWall(start.x,start.y) || isWall(end.x,end.y)) return null;
+    if(start.x===end.x && start.y===end.y) return [start];
+    const key=(x,y)=>y*COLS+x;
+    const visited=new Set([key(start.x,start.y)]);
+    const prev={};
+    const queue=[start]; let qi=0;
+    while(qi<queue.length){
+      const cur=queue[qi++];
+      if(cur.x===end.x && cur.y===end.y) break;
+      const nbrs=[{x:cur.x+1,y:cur.y},{x:cur.x-1,y:cur.y},{x:cur.x,y:cur.y+1},{x:cur.x,y:cur.y-1}];
+      for(const n of nbrs){
+        if(isWall(n.x,n.y)) continue;
+        const k=key(n.x,n.y);
+        if(visited.has(k)) continue;
+        visited.add(k); prev[k]={x:cur.x,y:cur.y};
+        queue.push(n);
+      }
+    }
+    const ek=key(end.x,end.y);
+    if(!visited.has(ek)) return null;
+    const path=[end]; let ck=ek;
+    while(prev[ck]){ path.unshift(prev[ck]); ck=key(prev[ck].x,prev[ck].y); }
+    return path;
+  }
+  function stepToward(fromX,fromY,toX,toY){
+    const s=cellOf(fromX,fromY), e=cellOf(toX,toY);
+    if(s.x===e.x && s.y===e.y) return {x:toX,y:toY};
+    const path=bfsPath(s,e);
+    if(!path || path.length<2) return {x:toX,y:toY};
+    const nxt=path[1];
+    return {x:(nxt.x+0.5)*CELL, y:(nxt.y+0.5)*CELL};
+  }
+
   function checkCopTraps(){
     const iceState = roomIceMelted[roomIndex];
     for(let ti=0; ti<room.trapCells.length; ti++){
@@ -291,6 +334,8 @@
       if(Math.hypot(cop.x-tx,cop.y-ty)<8) cop.wp=(cop.wp+1)%room.patrol.length;
     }
     if(cop.slowTimer>0) speed*=0.4;
+    const step = stepToward(cop.x, cop.y, tx, ty);
+    tx=step.x; ty=step.y;
     const d=Math.hypot(tx-cop.x,ty-cop.y)||1;
     tryMove(cop, (tx-cop.x)/d*speed*dt, (ty-cop.y)/d*speed*dt, COP_R);
     checkCopTraps();
