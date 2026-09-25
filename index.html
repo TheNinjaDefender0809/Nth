@@ -6,9 +6,8 @@
 <title>Nth — The Loop</title>
 <style>
   :root{
-    --bg:#0a0a0f; --wall-top:#3a4166; --wall-side:#1c2038; --floor-a:#171a2b; --floor-b:#13152280;
-    --thief:#4fd1c5; --cop:#ff4d6d; --cop-predict:#f6c453; --echo:rgba(79,209,197,0.4);
-    --door:#c084fc; --text:#e6e8f0;
+    --bg:#0a0a0f; --thief:#4fd1c5; --cop:#ff4d6d; --cop-predict:#f6c453; --cop-idle:#6b7280; --stun:#93c5fd;
+    --door:#c084fc; --key:#f6c453; --text:#e6e8f0;
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
@@ -18,6 +17,8 @@
   #hudRight{display:flex;gap:14px;align-items:center;}
   #lives{display:flex;gap:4px;}
   .life{width:9px;height:9px;border-radius:50%;background:var(--thief);box-shadow:0 0 6px var(--thief);}
+  #keyIcon{font-size:15px;opacity:0.25;transition:opacity .2s,transform .2s;}
+  #keyIcon.held{opacity:1;transform:scale(1.15);}
   #timer{font-variant-numeric:tabular-nums;font-size:20px;font-weight:800;}
   #timer.low{color:var(--cop);}
   #status{font-size:12px;opacity:0.8;min-height:16px;padding:0 16px 4px;}
@@ -25,7 +26,7 @@
   canvas{background:var(--bg);max-width:100%;max-height:100%;touch-action:none;border-radius:8px;}
   #toast{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(192,132,252,0.18);
          border:1px solid rgba(192,132,252,0.5);color:#e9d5ff;padding:5px 14px;border-radius:20px;
-         font-size:12px;font-weight:700;letter-spacing:0.5px;opacity:0;transition:opacity .3s;pointer-events:none;}
+         font-size:12px;font-weight:700;letter-spacing:0.5px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
   #controls{display:flex;justify-content:space-between;align-items:flex-end;padding:14px 18px 18px;gap:12px;}
   #joyzone{width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,0.06);position:relative;touch-action:none;}
   #joystick{width:46px;height:46px;border-radius:50%;background:var(--thief);position:absolute;left:32px;top:32px;box-shadow:0 0 12px var(--thief);}
@@ -44,11 +45,12 @@
   <div id="hud">
     <div class="title">NTH</div>
     <div id="hudRight">
+      <div id="keyIcon">🔑</div>
       <div id="lives"></div>
-      <div id="timer">45</div>
+      <div id="timer">60</div>
     </div>
   </div>
-  <div id="status">You're a thief with a broken time machine. Reach the door before the cop finds you.</div>
+  <div id="status">You're a thief with a broken time machine. The cop is still just watching you...</div>
   <div id="stage">
     <canvas id="c"></canvas>
     <div id="toast"></div>
@@ -66,13 +68,12 @@
 
 <script>
 (function(){
-  const CELL=32, COLS=13, ROWS=9;
+  const CELL=28, COLS=17, ROWS=13;
   const canvas = document.getElementById('c');
   canvas.width = COLS*CELL; canvas.height = ROWS*CELL;
   const ctx = canvas.getContext('2d');
-  const PLAYER_R=9, COP_R=10, ROOM_TIME=45;
+  const PLAYER_R=8, COP_R=9, ROOM_TIME=60, STUN_TIME=2.0, ICE_TIME=3.0, FIRE_TIME=3.0, COP_SLOW_TIME=2.0;
 
-  // ---- seeded RNG so a room's layout is identical every time it's regenerated with the same seed ----
   function mulberry32(a){
     return function(){
       a |= 0; a = a + 0x6D2B79F5 | 0;
@@ -90,57 +91,77 @@
     const doorOut = {x:COLS-1, y:Math.floor(ROWS/2)};
     let cx=doorIn.x, cy=doorIn.y;
     grid[cy][cx]=0;
+    const mainPath = new Set([cy+','+cx]);
     let guard=0;
-    while((cx!==doorOut.x || cy!==doorOut.y) && guard<600){
+    // lower rightward bias (0.42 vs the old 0.55) so the path winds up/down a lot more before
+    // committing toward the exit - a real maze feel instead of a mostly-straight corridor
+    while((cx!==doorOut.x || cy!==doorOut.y) && guard<1500){
       guard++;
       let dx=0,dy=0;
-      if(cx<doorOut.x && rng()<0.55) dx=1;
+      if(cx<doorOut.x && rng()<0.42) dx=1;
       else {
         const dir = Math.floor(rng()*4);
-        if(dir===0) dy=-1; else if(dir===1) dy=1; else if(dir===2) dx=1; else dx=(cx>1?-1:1);
+        if(dir===0) dy=-1; else if(dir===1) dy=1; else if(dir===2) dx=1; else dx=(cx>0?-1:1);
       }
-      cx = Math.min(COLS-2, Math.max(1, cx+dx));
-      cy = Math.min(ROWS-2, Math.max(1, cy+dy));
-      grid[cy][cx]=0;
-      if(rng()<0.35 && cy+1<ROWS-1) grid[cy+1][cx]=0;
-      if(rng()<0.35 && cy-1>0) grid[cy-1][cx]=0;
+      let nx = Math.max(0, Math.min(COLS-1, cx+dx));
+      let ny = Math.max(1, Math.min(ROWS-2, cy+dy));
+      cx=nx; cy=ny;
+      grid[cy][cx]=0; mainPath.add(cy+','+cx);
+      if(dx!==0){
+        const wy = rng()<0.5 ? cy-1 : cy+1;
+        if(wy>0 && wy<ROWS-1){ grid[wy][cx]=0; mainPath.add(wy+','+cx); }
+      } else if(dy!==0){
+        const wx = rng()<0.5 ? cx-1 : cx+1;
+        if(wx>0 && wx<COLS-1){ grid[cy][wx]=0; mainPath.add(cy+','+wx); }
+      }
     }
-    grid[doorOut.y][doorOut.x]=0;
-    for(let b=0;b<5;b++){
-      let bx=1+Math.floor(rng()*(COLS-2)), by=1+Math.floor(rng()*(ROWS-2));
-      let steps=3+Math.floor(rng()*4);
+    grid[doorOut.y][doorOut.x]=0; mainPath.add(doorOut.y+','+doorOut.x);
+    const mainPathArr = Array.from(mainPath).map(s=>{const [y,x]=s.split(',').map(Number); return {x,y};});
+    const branchSet = new Set();
+    for(let b=0;b<8;b++){
+      const start = mainPathArr[Math.floor(rng()*mainPathArr.length)];
+      let bx=start.x, by=start.y;
+      let steps=4+Math.floor(rng()*5);
       for(let s=0;s<steps;s++){
-        grid[by][bx]=0;
         const dir=Math.floor(rng()*4);
         if(dir===0) bx=Math.min(COLS-2,bx+1);
         else if(dir===1) bx=Math.max(1,bx-1);
         else if(dir===2) by=Math.min(ROWS-2,by+1);
         else by=Math.max(1,by-1);
+        grid[by][bx]=0;
+        if(!mainPath.has(by+','+bx)) branchSet.add(by+','+bx);
       }
     }
+    const branchCells = Array.from(branchSet).map(s=>{const [y,x]=s.split(',').map(Number); return {x,y};});
+    for(let i=branchCells.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [branchCells[i],branchCells[j]]=[branchCells[j],branchCells[i]]; }
+    const trapTypes=['spike','fire','ice'];
+    const trapCells = branchCells.slice(0,4).map(c=>({x:c.x, y:c.y, type:trapTypes[Math.floor(rng()*3)]}));
     const floors=[];
     for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++) if(grid[y][x]===0) floors.push({x,y});
     function pickFloor(){ return floors[Math.floor(rng()*floors.length)] || doorOut; }
+    let keyCell = pickFloor(), g2=0;
+    while(((keyCell.x===doorIn.x&&keyCell.y===doorIn.y)||(keyCell.x===doorOut.x&&keyCell.y===doorOut.y)) && g2<20){ keyCell=pickFloor(); g2++; }
     return {
-      grid, doorIn, doorOut,
+      grid, doorIn, doorOut, keyCell, trapCells,
       patrol: [pickFloor(), pickFloor(), pickFloor()],
       copSpawn: pickFloor()
     };
   }
 
-  // ---- meta state (persists across room retries, wiped on full collapse) ----
-  let metaSeed, roomIndex, roomsCleared, totalEchoesEver, livingEchoTotal, dirHist;
-  // ---- per-room state ----
-  let room, player, cop, recording, roomTimeLeft, elapsed, gameOver;
-  let roomEchoes, roomEchoAlive; // {roomIndex: [recordings]}, {roomIndex: [bool]}
-  let particles = [];
-  let playerPhase = 0, playerTrail = [];
+  let metaSeed, roomIndex, roomsCleared, totalEchoesEver, livingEchoTotal, dirHist, metaFirstAttempt, roomFirstAttempt, roomKeyState, roomIceMelted;
+  let room, player, cop, recording, roomTimeLeft, elapsed, gameOver, playerStunTimer, playerFireTimer;
+  let roomEchoes, roomEchoAlive, roomEchoStunTimer, roomEchoTimeOffset, roomEchoFireTimer, roomArrestMarkers;
+  let particles=[], playerPhase=0, playerTrail=[];
+  let hasKeyThisAttempt=false, keyPickupTimeThisAttempt=null;
 
   function metaReset(){
     metaSeed = Math.floor(Math.random()*1e9);
-    roomIndex = 0; roomsCleared = 0; totalEchoesEver = 0; livingEchoTotal = 0;
+    roomIndex=0; roomsCleared=0; totalEchoesEver=0; livingEchoTotal=0;
     dirHist = new Array(8).fill(0);
-    roomEchoes = {}; roomEchoAlive = {};
+    metaFirstAttempt = true;
+    roomFirstAttempt = {};
+    roomEchoes={}; roomEchoAlive={}; roomEchoStunTimer={}; roomEchoTimeOffset={}; roomEchoFireTimer={};
+    roomKeyState={}; roomIceMelted={}; roomArrestMarkers={};
     enterRoom(0);
   }
 
@@ -148,29 +169,32 @@
     roomIndex = idx;
     room = generateRoom(metaSeed, idx);
     player = {x:(room.doorIn.x+0.5)*CELL, y:(room.doorIn.y+0.5)*CELL};
-    cop = {x:(room.copSpawn.x+0.5)*CELL, y:(room.copSpawn.y+0.5)*CELL, wp:0, state:'patrol', target:null, lastSeen:null, predictClock:0};
-    recording = [];
-    roomTimeLeft = ROOM_TIME;
-    elapsed = 0;
-    gameOver = false;
-    particles = []; playerTrail = [];
+    cop = {x:(room.copSpawn.x+0.5)*CELL, y:(room.copSpawn.y+0.5)*CELL, wp:0, state:'patrol',
+           chaseType:null, chaseIdx:null, target:null, lastSeen:null, predictClock:0, slowTimer:0,
+           priorityType:null, priorityIdx:null};
+    recording=[]; roomTimeLeft=ROOM_TIME; elapsed=0; gameOver=false; playerStunTimer=0; playerFireTimer=0;
+    particles=[]; playerTrail=[];
+    hasKeyThisAttempt=false; keyPickupTimeThisAttempt=null;
+    if(roomFirstAttempt[idx]===undefined) roomFirstAttempt[idx]=true;
+    if(!roomKeyState[idx]) roomKeyState[idx] = {designatedCarrierEi:null, groundPos:{x:(room.keyCell.x+0.5)*CELL, y:(room.keyCell.y+0.5)*CELL}};
+    if(!roomIceMelted[idx]) roomIceMelted[idx] = room.trapCells.map(()=>false);
     document.getElementById('overlay').style.display='none';
     document.getElementById('overlay').classList.remove('collapse');
-    setStatus(`Room ${idx+1} — find the door.`);
+    document.getElementById('keyIcon').classList.remove('held');
+    setStatus(roomFirstAttempt[idx] ? "The cop is still just watching you here..." : `Room ${idx+1} — find the key, then the door.`);
     renderLives();
   }
 
   function setStatus(t){ document.getElementById('status').textContent = t; }
   function toast(t){
-    const el = document.getElementById('toast');
-    el.textContent = t; el.style.opacity = '1';
+    const el=document.getElementById('toast');
+    el.textContent=t; el.style.opacity='1';
     clearTimeout(toast._t);
-    toast._t = setTimeout(()=>{ el.style.opacity='0'; }, 1400);
+    toast._t=setTimeout(()=>{ el.style.opacity='0'; }, 1300);
   }
   function renderLives(){
-    const el = document.getElementById('lives');
-    el.innerHTML = '';
-    const n = Math.min(livingEchoTotal, 8);
+    const el=document.getElementById('lives'); el.innerHTML='';
+    const n=Math.min(livingEchoTotal,8);
     for(let i=0;i<n;i++){ const d=document.createElement('div'); d.className='life'; el.appendChild(d); }
     if(livingEchoTotal>8){ const d=document.createElement('div'); d.style.fontSize='10px'; d.style.color='var(--thief)'; d.textContent='+'+(livingEchoTotal-8); el.appendChild(d); }
   }
@@ -178,14 +202,12 @@
   function isWall(cx,cy){ return cx<0||cy<0||cx>=COLS||cy>=ROWS || room.grid[cy][cx]===1; }
 
   function tryMove(entity, dx, dy, r){
-    let tryX = entity.x+dx, tryY = entity.y;
-    let okX = true;
+    let tryX=entity.x+dx, tryY=entity.y, okX=true;
     for(const oy of [-r,r]){ const cx=Math.floor((tryX+(dx>0?r:-r))/CELL), cy=Math.floor((tryY+oy)/CELL); if(isWall(cx,cy)) okX=false; }
-    if(okX) entity.x = tryX;
-    let tryY2 = entity.y+dy;
-    let okY = true;
+    if(okX) entity.x=tryX;
+    let tryY2=entity.y+dy, okY=true;
     for(const ox of [-r,r]){ const cx=Math.floor((entity.x+ox)/CELL), cy=Math.floor((tryY2+(dy>0?r:-r))/CELL); if(isWall(cx,cy)) okY=false; }
-    if(okY) entity.y = tryY2;
+    if(okY) entity.y=tryY2;
   }
 
   function lineOfSight(x1,y1,x2,y2){
@@ -197,7 +219,6 @@
     return true;
   }
 
-  // ---- player behaviour tracking, persists across rooms (the AI's read on YOU, not the room) ----
   function trackMovement(mx,my,dt){
     for(let i=0;i<8;i++) dirHist[i]*=0.995;
     if(Math.hypot(mx,my)<0.15) return;
@@ -212,31 +233,67 @@
     return {x:Math.cos(angle), y:Math.sin(angle)};
   }
 
-  function updateCop(dt){
-    const dist = Math.hypot(player.x-cop.x, player.y-cop.y);
-    const canSee = dist<190 && lineOfSight(cop.x,cop.y,player.x,player.y);
-    if(canSee){ cop.state='chase'; cop.lastSeen={x:player.x,y:player.y}; }
+  function checkCopTraps(){
+    const iceState = roomIceMelted[roomIndex];
+    for(let ti=0; ti<room.trapCells.length; ti++){
+      const t=room.trapCells[ti];
+      if(t.type==='ice' && iceState[ti]) continue;
+      const tx=(t.x+0.5)*CELL, ty=(t.y+0.5)*CELL;
+      if(Math.hypot(cop.x-tx,cop.y-ty) < COP_R+7){ cop.slowTimer=COP_SLOW_TIME; break; }
+    }
+  }
+
+  // cop is never itself stunned - only slowed by traps - so it always keeps moving, which is
+  // what prevents a frozen cop re-colliding with the same non-target forever
+  function updateCop(dt, echoPositions){
+    if(cop.slowTimer>0) cop.slowTimer=Math.max(0,cop.slowTimer-dt);
+    const lenient = roomFirstAttempt[roomIndex];
+    const VISION = lenient ? 130 : 190;
+    const CHASE_SPEED = lenient ? 52 : 74;
+
+    let best=null, bestType=null, bestIdx=null;
+    for(const e of echoPositions){
+      if(Math.hypot(e.x-cop.x,e.y-cop.y)<VISION && lineOfSight(cop.x,cop.y,e.x,e.y)){ best=e; bestType='echo'; bestIdx=e.ei; break; }
+    }
+    if(!best){
+      const dP=Math.hypot(player.x-cop.x,player.y-cop.y);
+      if(dP<VISION && lineOfSight(cop.x,cop.y,player.x,player.y)){ best={x:player.x,y:player.y}; bestType='player'; }
+    }
+    cop.priorityType=bestType; cop.priorityIdx=bestIdx;
+
+    if(best){ cop.state='chase'; cop.chaseType=bestType; cop.chaseIdx=bestIdx; cop.lastSeen={x:best.x,y:best.y}; }
     else if(cop.state==='chase'){
-      const dv=dominantDirVector(), PD=95;
-      cop.target={x:cop.lastSeen.x+dv.x*PD, y:cop.lastSeen.y+dv.y*PD};
-      cop.state=(dv.x||dv.y)?'predict':'search';
-      cop.predictClock=1.3;
+      if(cop.chaseType==='player' && !lenient){
+        const dv=dominantDirVector(), PD=95;
+        cop.target={x:cop.lastSeen.x+dv.x*PD, y:cop.lastSeen.y+dv.y*PD};
+        cop.state=(dv.x||dv.y)?'predict':'search';
+        cop.predictClock=1.3;
+      } else cop.state='search';
     }
     let tx,ty,speed;
-    if(cop.state==='chase'){ tx=player.x; ty=player.y; speed=74; }
-    else if(cop.state==='predict'){
+    if(cop.state==='chase'){
+      if(cop.chaseType==='player'){ tx=player.x; ty=player.y; }
+      else {
+        const cur=echoPositions.find(e=>e.ei===cop.chaseIdx);
+        if(cur){ tx=cur.x; ty=cur.y; cop.lastSeen={x:tx,y:ty}; }
+        else { tx=cop.lastSeen.x; ty=cop.lastSeen.y; cop.state='search'; }
+      }
+      speed=CHASE_SPEED;
+    } else if(cop.state==='predict'){
       tx=cop.target.x; ty=cop.target.y; speed=82;
       cop.predictClock-=dt;
       if(cop.predictClock<=0 || Math.hypot(cop.x-tx,cop.y-ty)<10) cop.state='search';
     } else if(cop.state==='search' && cop.lastSeen){
-      tx=cop.lastSeen.x; ty=cop.lastSeen.y; speed=58;
+      tx=cop.lastSeen.x; ty=cop.lastSeen.y; speed=lenient?45:58;
       if(Math.hypot(cop.x-tx,cop.y-ty)<10){ cop.state='patrol'; cop.lastSeen=null; }
     } else {
       const wp=room.patrol[cop.wp]; tx=(wp.x+0.5)*CELL; ty=(wp.y+0.5)*CELL; speed=42;
       if(Math.hypot(cop.x-tx,cop.y-ty)<8) cop.wp=(cop.wp+1)%room.patrol.length;
     }
+    if(cop.slowTimer>0) speed*=0.4;
     const d=Math.hypot(tx-cop.x,ty-cop.y)||1;
     tryMove(cop, (tx-cop.x)/d*speed*dt, (ty-cop.y)/d*speed*dt, COP_R);
+    checkCopTraps();
   }
 
   function spawnBurst(x,y,color,n){
@@ -246,53 +303,85 @@
     }
   }
 
-  function finalizeRoomEcho(){
-    if(recording.length<3) return;
-    roomEchoes[roomIndex] = roomEchoes[roomIndex] || [];
-    roomEchoAlive[roomIndex] = roomEchoAlive[roomIndex] || [];
-    if(roomEchoes[roomIndex].length>=6) return; // cap per room, keeps things performant
-    roomEchoes[roomIndex].push(recording.slice());
+  // for spike/fire deaths - permanently removed but leaves NO ghost marker, unlike a cop arrest
+  function killEchoForReal(ei,x,y,color,message){
+    roomEchoAlive[roomIndex][ei]=false; livingEchoTotal--; renderLives();
+    spawnBurst(x,y,color,14);
+    toast(message);
+    if(ei===roomKeyState[roomIndex].designatedCarrierEi && !hasKeyThisAttempt){
+      roomKeyState[roomIndex].groundPos={x,y};
+    }
+  }
+
+  function finalizeRoomEcho(diedHoldingKey){
+    if(recording.length<3) return -1;
+    roomEchoes[roomIndex]=roomEchoes[roomIndex]||[];
+    roomEchoAlive[roomIndex]=roomEchoAlive[roomIndex]||[];
+    roomEchoStunTimer[roomIndex]=roomEchoStunTimer[roomIndex]||[];
+    roomEchoTimeOffset[roomIndex]=roomEchoTimeOffset[roomIndex]||[];
+    roomEchoFireTimer[roomIndex]=roomEchoFireTimer[roomIndex]||[];
+    if(roomEchoes[roomIndex].length>=6) return -1;
+    roomEchoes[roomIndex].push({path:recording.slice(), keyPickupTime:keyPickupTimeThisAttempt});
     roomEchoAlive[roomIndex].push(true);
+    roomEchoStunTimer[roomIndex].push(0);
+    roomEchoTimeOffset[roomIndex].push(0);
+    roomEchoFireTimer[roomIndex].push(0);
     totalEchoesEver++; livingEchoTotal++;
     renderLives();
+    const newIdx = roomEchoes[roomIndex].length-1;
+    if(diedHoldingKey) roomKeyState[roomIndex].designatedCarrierEi = newIdx;
+    return newIdx;
   }
 
-  function checkMetaCollapse(){
-    if(totalEchoesEver>0 && livingEchoTotal<=0){
-      gameOver = true;
-      const ov = document.getElementById('overlay');
-      ov.classList.add('collapse');
-      document.getElementById('ovTitle').textContent = 'Timeline Collapsed';
-      document.getElementById('ovText').textContent = `Every version of you is gone. You reached room ${roomIndex+1}. Starting a new timeline.`;
-      ov.style.display='flex';
-      document.getElementById('ovBtn').onclick = ()=>{ metaReset(); };
-      return true;
-    }
-    return false;
-  }
-
-  function endAttempt(caught){
-    finalizeRoomEcho();
-    if(checkMetaCollapse()) return;
-    gameOver = true;
-    const ov = document.getElementById('overlay');
-    document.getElementById('ovTitle').textContent = caught ? 'Caught' : "Time's Up";
-    document.getElementById('ovText').textContent = caught
-      ? "The cop got you. That run is now an Echo — use it next time."
-      : "Ran out of time in this room. That run is now an Echo.";
+  function showCollapse(){
+    const ov=document.getElementById('overlay');
+    ov.classList.add('collapse');
+    document.getElementById('ovTitle').textContent='Every Echo Got Arrested';
+    document.getElementById('ovText').textContent=`Timeline collapses. You reached room ${roomIndex+1}. Starting fresh.`;
     ov.style.display='flex';
-    document.getElementById('ovBtn').onclick = ()=>{ enterRoom(roomIndex); };
+    document.getElementById('ovBtn').onclick=()=>{ metaReset(); };
+  }
+
+  function endAttempt(reason){
+    if(gameOver) return;
+    gameOver=true;
+    const wasMetaFirst = metaFirstAttempt;
+    metaFirstAttempt=false;
+    roomFirstAttempt[roomIndex]=false;
+    const newIdx = finalizeRoomEcho(hasKeyThisAttempt);
+    if(!wasMetaFirst){
+      const otherLiving = livingEchoTotal - (newIdx>=0?1:0);
+      if(otherLiving<=0){
+        if(newIdx>=0){ roomEchoAlive[roomIndex][newIdx]=false; livingEchoTotal--; }
+        showCollapse();
+        return;
+      }
+    }
+    const ov=document.getElementById('overlay');
+    const msgs = {
+      caught:["Caught","The cop got you. That run is now an Echo — use it."],
+      spike:["Impaled","A spike trap got you. That run is now an Echo."],
+      fire:["Burned","You caught fire and it caught up with you. That run is now an Echo."],
+      timeout:["Time's Up","Ran out of time in this room. That run is now an Echo."],
+      reset:["Reset","You reset the loop on purpose. That run is now an Echo."]
+    };
+    const m = msgs[reason]||msgs.caught;
+    document.getElementById('ovTitle').textContent=m[0];
+    document.getElementById('ovText').textContent=m[1];
+    ov.style.display='flex';
+    document.getElementById('ovBtn').onclick=()=>{ enterRoom(roomIndex); };
   }
 
   function clearRoom(){
-    finalizeRoomEcho();
+    metaFirstAttempt=false;
+    roomFirstAttempt[roomIndex]=false;
+    finalizeRoomEcho(false);
     roomsCleared++;
     toast(`ROOM ${roomIndex+1} CLEARED`);
     spawnBurst(player.x, player.y, '#c084fc', 18);
     enterRoom(roomIndex+1);
   }
 
-  // ---- input ----
   let joyVec={x:0,y:0}, joyActive=false, joyId=null, joyCenter={x:0,y:0};
   const joyzone=document.getElementById('joyzone'), joystick=document.getElementById('joystick');
   function joyStart(e){ const t=e.changedTouches?e.changedTouches[0]:e; joyActive=true; joyId=t.identifier??'mouse';
@@ -308,17 +397,13 @@
   const keys={};
   window.addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
   window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
-  document.getElementById('resetBtn').addEventListener('click', ()=>{
-    if(gameOver) return;
-    finalizeRoomEcho();
-    if(checkMetaCollapse()) return;
-    enterRoom(roomIndex);
-  });
+  document.getElementById('resetBtn').addEventListener('click', ()=> endAttempt('reset'));
 
-  function getEchoPos(rec, t){
-    if(t>rec[rec.length-1].t) return null;
-    let seg=rec[0];
-    for(let i=0;i<rec.length-1;i++){ if(rec[i].t<=t && rec[i+1].t>=t){ seg=rec[i]; break; } }
+  function getEchoPos(path, t){
+    if(t<=path[0].t) return path[0];
+    if(t>=path[path.length-1].t) return path[path.length-1];
+    let seg=path[0];
+    for(let i=0;i<path.length-1;i++){ if(path[i].t<=t && path[i+1].t>=t){ seg=path[i]; break; } }
     return seg;
   }
 
@@ -326,49 +411,137 @@
   function loop(now){
     const dt=Math.min((now-last)/1000,0.05); last=now;
     if(!gameOver){
-      roomTimeLeft -= dt; elapsed += dt;
-      let mx=joyVec.x, my=joyVec.y;
-      if(keys['w']||keys['arrowup']) my=-1;
-      if(keys['s']||keys['arrowdown']) my=1;
-      if(keys['a']||keys['arrowleft']) mx=-1;
-      if(keys['d']||keys['arrowright']) mx=1;
-      const mag=Math.hypot(mx,my);
-      if(mag>0.15){
-        tryMove(player, mx/mag*90*dt, my/mag*90*dt, PLAYER_R);
-        playerPhase += dt*9;
-      }
-      trackMovement(mx,my,dt);
-      recording.push({t:elapsed, x:player.x, y:player.y});
-      playerTrail.push({x:player.x,y:player.y,a:1});
-      if(playerTrail.length>10) playerTrail.shift();
-      playerTrail.forEach(p=>p.a*=0.88);
+      roomTimeLeft-=dt; elapsed+=dt;
 
-      updateCop(dt);
-
-      const activeEchoPositions=[];
-      const list = roomEchoes[roomIndex]||[], alive = roomEchoAlive[roomIndex]||[];
-      for(let ei=0;ei<list.length;ei++){
-        if(!alive[ei]) continue;
-        const pos = getEchoPos(list[ei], elapsed);
-        if(!pos) continue;
-        if(Math.hypot(pos.x-cop.x,pos.y-cop.y) < COP_R+PLAYER_R){
-          alive[ei]=false; livingEchoTotal--; renderLives();
-          spawnBurst(pos.x,pos.y,'#ff4d6d',14);
-          toast(`AN ECHO WAS CAUGHT`);
-          if(checkMetaCollapse()) break;
-          continue;
-        }
-        activeEchoPositions.push(pos);
+      if(playerFireTimer>0){
+        playerFireTimer-=dt;
+        if(playerFireTimer<=0){ spawnBurst(player.x,player.y,'#ff8c42',14); endAttempt('fire'); }
       }
 
       if(!gameOver){
-        if(Math.hypot(player.x-cop.x, player.y-cop.y) < PLAYER_R+COP_R){
-          spawnBurst(player.x,player.y,'#ff4d6d',18);
-          endAttempt(true);
-        } else if(Math.floor(player.x/CELL)===room.doorOut.x && Math.floor(player.y/CELL)===room.doorOut.y){
+        let mx=joyVec.x, my=joyVec.y;
+        if(keys['w']||keys['arrowup']) my=-1;
+        if(keys['s']||keys['arrowdown']) my=1;
+        if(keys['a']||keys['arrowleft']) mx=-1;
+        if(keys['d']||keys['arrowright']) mx=1;
+        if(playerStunTimer>0){
+          playerStunTimer=Math.max(0,playerStunTimer-dt);
+          mx=0; my=0;
+        } else if(Math.hypot(mx,my)>0.15){
+          const m=Math.hypot(mx,my);
+          tryMove(player, mx/m*90*dt, my/m*90*dt, PLAYER_R);
+          playerPhase+=dt*9;
+        }
+        trackMovement(mx,my,dt);
+        recording.push({t:elapsed, x:player.x, y:player.y});
+        playerTrail.push({x:player.x,y:player.y,a:1});
+        if(playerTrail.length>10) playerTrail.shift();
+        playerTrail.forEach(p=>p.a*=0.88);
+      }
+
+      const list=roomEchoes[roomIndex]||[], aliveArr=roomEchoAlive[roomIndex]||[];
+      const stunArr=roomEchoStunTimer[roomIndex]||[], offsetArr=roomEchoTimeOffset[roomIndex]||[], fireArr=roomEchoFireTimer[roomIndex]||[];
+      let echoPositions=[];
+      for(let ei=0; ei<list.length; ei++){
+        if(!aliveArr[ei]) continue;
+        if(stunArr[ei]>0){
+          stunArr[ei]=Math.max(0,stunArr[ei]-dt);
+          offsetArr[ei]=(offsetArr[ei]||0)+dt;
+        }
+        const effT = elapsed - (offsetArr[ei]||0);
+        const pos=getEchoPos(list[ei].path, effT);
+        echoPositions.push({ei, x:pos.x, y:pos.y, stunned: stunArr[ei]>0, fire: fireArr[ei]>0});
+      }
+      // fire burns out
+      for(const e of echoPositions){
+        if(fireArr[e.ei]>0){
+          fireArr[e.ei]-=dt;
+          if(fireArr[e.ei]<=0) killEchoForReal(e.ei, e.x, e.y, '#ff8c42', 'AN ECHO BURNED');
+        }
+      }
+      // trap contact for still-living echoes: spike kills for real, fire ignites, ice freezes+melts
+      const iceState = roomIceMelted[roomIndex];
+      for(const e of echoPositions){
+        if(!aliveArr[e.ei]) continue;
+        for(let ti=0; ti<room.trapCells.length; ti++){
+          const t=room.trapCells[ti];
+          if(t.type==='ice' && iceState[ti]) continue;
+          const tx=(t.x+0.5)*CELL, ty=(t.y+0.5)*CELL;
+          if(Math.hypot(e.x-tx,e.y-ty) < PLAYER_R+7){
+            if(t.type==='spike'){ killEchoForReal(e.ei,e.x,e.y,'#ff4d6d','AN ECHO WAS IMPALED'); }
+            else if(t.type==='fire' && fireArr[e.ei]<=0){ fireArr[e.ei]=FIRE_TIME; toast('AN ECHO CAUGHT FIRE'); }
+            else if(t.type==='ice' && stunArr[e.ei]<=0){ stunArr[e.ei]=ICE_TIME; iceState[ti]=true; toast('AN ECHO FROZE — ice melts'); spawnBurst(e.x,e.y,'#93c5fd',10); }
+            break;
+          }
+        }
+      }
+      const liveEchoPositions = echoPositions.filter(e=>aliveArr[e.ei]);
+
+      const ks = roomKeyState[roomIndex];
+      let keyPos = ks.groundPos;
+      if(!hasKeyThisAttempt && ks.designatedCarrierEi!==null){
+        const ei=ks.designatedCarrierEi;
+        const rec=list[ei], aliveE=aliveArr[ei];
+        if(rec && aliveE && rec.keyPickupTime!==null && elapsed>=rec.keyPickupTime){
+          const cur = liveEchoPositions.find(e=>e.ei===ei);
+          if(cur){
+            keyPos = {x:cur.x, y:cur.y};
+            const lastPt = rec.path[rec.path.length-1];
+            if(elapsed>=lastPt.t) ks.groundPos = {x:lastPt.x, y:lastPt.y};
+          }
+        }
+      }
+      if(!gameOver && !hasKeyThisAttempt && Math.hypot(player.x-keyPos.x,player.y-keyPos.y)<PLAYER_R+8){
+        hasKeyThisAttempt=true; keyPickupTimeThisAttempt=elapsed;
+        spawnBurst(player.x,player.y,'#f6c453',10);
+        toast('KEY PICKED UP');
+        document.getElementById('keyIcon').classList.add('held');
+      }
+
+      updateCop(dt, liveEchoPositions);
+
+      for(const e of liveEchoPositions){
+        if(!aliveArr[e.ei]) continue;
+        if(Math.hypot(e.x-cop.x,e.y-cop.y) < COP_R+PLAYER_R){
+          const isPriority = cop.priorityType==='echo' && cop.priorityIdx===e.ei;
+          if(isPriority){
+            aliveArr[e.ei]=false; livingEchoTotal--; renderLives();
+            spawnBurst(e.x,e.y,'#ff4d6d',14);
+            toast('ECHO ARRESTED');
+            roomArrestMarkers[roomIndex]=roomArrestMarkers[roomIndex]||[];
+            roomArrestMarkers[roomIndex].push({x:e.x,y:e.y});
+            if(e.ei===ks.designatedCarrierEi && !hasKeyThisAttempt){ ks.groundPos={x:e.x,y:e.y}; }
+          } else if((stunArr[e.ei]||0)<=0){
+            stunArr[e.ei]=STUN_TIME;
+            toast('ECHO STUNNED');
+            spawnBurst(e.x,e.y,'#93c5fd',10);
+          }
+        }
+      }
+      const renderEchoPositions = liveEchoPositions.filter(e=>aliveArr[e.ei]);
+
+      if(!gameOver){
+        const playerTouchesCop = Math.hypot(player.x-cop.x, player.y-cop.y) < PLAYER_R+COP_R;
+        let trapHit=null;
+        for(let ti=0; ti<room.trapCells.length; ti++){
+          const t=room.trapCells[ti];
+          if(t.type==='ice' && iceState[ti]) continue;
+          const tx=(t.x+0.5)*CELL, ty=(t.y+0.5)*CELL;
+          if(Math.hypot(player.x-tx,player.y-ty) < PLAYER_R+7){ trapHit={t,ti}; break; }
+        }
+        if(playerTouchesCop){
+          const isPriorityPlayer = cop.priorityType==='player' || liveEchoPositions.length===0;
+          if(isPriorityPlayer){ spawnBurst(player.x,player.y,'#ff4d6d',18); endAttempt('caught'); }
+          else if(playerStunTimer<=0){ playerStunTimer=STUN_TIME; toast('YOU GOT STUNNED'); spawnBurst(player.x,player.y,'#93c5fd',10); }
+        } else if(trapHit){
+          const {t,ti}=trapHit;
+          if(t.type==='spike'){ spawnBurst(player.x,player.y,'#ff4d6d',14); endAttempt('spike'); }
+          else if(t.type==='fire' && playerFireTimer<=0){ playerFireTimer=FIRE_TIME; toast('YOU CAUGHT FIRE'); }
+          else if(t.type==='ice' && playerStunTimer<=0){ playerStunTimer=ICE_TIME; iceState[ti]=true; toast('FROZEN — ice melts'); spawnBurst(player.x,player.y,'#93c5fd',10); }
+        } else if(hasKeyThisAttempt && Math.floor(player.x/CELL)===room.doorOut.x && Math.floor(player.y/CELL)===room.doorOut.y){
           clearRoom();
         } else if(roomTimeLeft<=0){
-          endAttempt(false);
+          endAttempt('timeout');
         }
       }
 
@@ -381,80 +554,96 @@
       timerEl.textContent=Math.max(0,Math.ceil(roomTimeLeft));
       timerEl.classList.toggle('low', roomTimeLeft<12);
 
-      render(activeEchoPositions);
+      render(renderEchoPositions, keyPos);
     }
     requestAnimationFrame(loop);
   }
 
-  function drawCharacter(x,y,r,color,phase,bounce){
-    // drop shadow (reads as depth even with flat shapes)
+  function drawCharacter(x,y,r,color,phase,bounce,alpha){
+    ctx.globalAlpha = alpha===undefined?1:alpha;
     ctx.fillStyle='rgba(0,0,0,0.35)';
     ctx.beginPath(); ctx.ellipse(x,y+r*0.7,r*0.9,r*0.35,0,0,7); ctx.fill();
     const bob = bounce ? -Math.abs(Math.sin(phase))*3 : 0;
-    // legs
     ctx.strokeStyle=color; ctx.lineWidth=3; ctx.lineCap='round';
     const swing = bounce ? Math.sin(phase)*5 : 0;
     ctx.beginPath(); ctx.moveTo(x-3,y+r*0.4+bob); ctx.lineTo(x-3+swing,y+r*1.1+bob); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x+3,y+r*0.4+bob); ctx.lineTo(x+3-swing,y+r*1.1+bob); ctx.stroke();
-    // body with a simple gradient for volume
-    const g = ctx.createRadialGradient(x-r*0.3,y+bob-r*0.3,1,x,y+bob,r*1.3);
+    const g=ctx.createRadialGradient(x-r*0.3,y+bob-r*0.3,1,x,y+bob,r*1.3);
     g.addColorStop(0, shade(color,40)); g.addColorStop(1, color);
-    ctx.fillStyle=g;
-    ctx.beginPath(); ctx.arc(x,y+bob,r,0,7); ctx.fill();
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y+bob,r,0,7); ctx.fill();
+    ctx.globalAlpha=1;
   }
   function shade(hex, amt){
-    const c = hex.replace('#','');
-    const num = parseInt(c,16);
+    const c=hex.replace('#',''); const num=parseInt(c.length===6?c:'ff4d6d',16);
     let r=(num>>16)+amt, g=(num>>8 & 0xff)+amt, b=(num & 0xff)+amt;
     r=Math.min(255,Math.max(0,r)); g=Math.min(255,Math.max(0,g)); b=Math.min(255,Math.max(0,b));
     return `rgb(${r},${g},${b})`;
   }
 
-  function render(activeEchoPositions){
+  function render(renderEchoPositions, keyPos){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
       const isDoor = (x===room.doorOut.x&&y===room.doorOut.y) || (x===room.doorIn.x&&y===room.doorIn.y);
       if(room.grid[y][x]===1){
-        // beveled block: dark side + lighter top face, faked 3D
-        ctx.fillStyle='var(--wall-side)'.startsWith('var')?'#1c2038':'#1c2038';
-        ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
-        ctx.fillStyle='#3a4166';
-        ctx.fillRect(x*CELL+2,y*CELL+2,CELL-6,CELL-6);
+        ctx.fillStyle='#1c2038'; ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+        ctx.fillStyle='#3a4166'; ctx.fillRect(x*CELL+2,y*CELL+2,CELL-6,CELL-6);
       } else {
-        ctx.fillStyle = ((x+y)%2===0) ? '#171a2b' : '#141728';
+        ctx.fillStyle=((x+y)%2===0)?'#171a2b':'#141728';
         ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
       }
       if(isDoor){
-        const pulse = 0.5+0.5*Math.sin(performance.now()/250);
-        ctx.fillStyle = `rgba(192,132,252,${0.25+0.25*pulse})`;
+        const locked=(x===room.doorOut.x&&y===room.doorOut.y) && !hasKeyThisAttempt;
+        const pulse=0.5+0.5*Math.sin(performance.now()/250);
+        ctx.fillStyle = locked ? `rgba(120,90,150,0.35)` : `rgba(192,132,252,${0.3+0.3*pulse})`;
         ctx.fillRect(x*CELL+3,y*CELL+3,CELL-6,CELL-6);
       }
     }
-    // echoes
-    for(const e of activeEchoPositions) drawCharacter(e.x,e.y,PLAYER_R,'#4fd1c580',0,false);
-    // player trail
+    const iceState = roomIceMelted[roomIndex];
+    room.trapCells.forEach((t,ti)=>{
+      if(t.type==='ice' && iceState[ti]) return; // melted, gone
+      const tx=(t.x+0.5)*CELL, ty=(t.y+0.5)*CELL;
+      ctx.font='13px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      if(t.type==='spike'){
+        ctx.strokeStyle='rgba(255,77,109,0.8)'; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(tx-6,ty-6); ctx.lineTo(tx+6,ty+6); ctx.moveTo(tx+6,ty-6); ctx.lineTo(tx-6,ty+6); ctx.stroke();
+      } else if(t.type==='fire'){ ctx.fillText('🔥', tx, ty); }
+      else if(t.type==='ice'){ ctx.fillText('❄️', tx, ty); }
+    });
+    for(const m of (roomArrestMarkers[roomIndex]||[])) drawCharacter(m.x,m.y,PLAYER_R,'#4fd1c5',0,false,0.12);
+
+    if(!hasKeyThisAttempt){
+      const bob=Math.sin(performance.now()/220)*3;
+      ctx.font='15px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('🔑', keyPos.x, keyPos.y-13+bob);
+    }
+    for(const e of renderEchoPositions){
+      const col = e.fire ? '#ff8c42' : e.stunned ? '#93c5fd' : '#4fd1c5';
+      drawCharacter(e.x,e.y,PLAYER_R,col,0,false,0.55);
+      if(e.stunned){ ctx.font='10px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#93c5fd'; ctx.fillText('❄️', e.x, e.y-15); }
+      if(e.fire){ ctx.font='10px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ff8c42'; ctx.fillText('🔥', e.x, e.y-15); }
+    }
     for(const p of playerTrail){
       ctx.fillStyle=`rgba(79,209,197,${0.25*p.a})`;
       ctx.beginPath(); ctx.arc(p.x,p.y,PLAYER_R*0.7,0,7); ctx.fill();
     }
-    // cop vision cone tint
-    ctx.fillStyle = cop.state==='predict' ? 'rgba(246,196,83,0.14)' : 'rgba(255,77,109,0.07)';
+    const lenient = roomFirstAttempt[roomIndex];
+    const copColor = cop.slowTimer>0 ? '#93c5fd' : lenient ? '#6b7280' : (cop.state==='predict' ? '#f6c453' : '#ff4d6d');
+    ctx.fillStyle = lenient ? 'rgba(107,114,128,0.06)' : (cop.state==='predict' ? 'rgba(246,196,83,0.14)' : 'rgba(255,77,109,0.07)');
     ctx.beginPath(); ctx.moveTo(cop.x,cop.y); ctx.arc(cop.x,cop.y,190,0,7); ctx.fill();
-    drawCharacter(cop.x,cop.y,COP_R, cop.state==='predict' ? '#f6c453' : '#ff4d6d', now_phase(), true);
-    drawCharacter(player.x,player.y,PLAYER_R,'#4fd1c5',playerPhase,true);
-    // particles
+    drawCharacter(cop.x,cop.y,COP_R,copColor,performance.now()/120,true,1);
+    const playerCol = playerFireTimer>0 ? '#ff8c42' : playerStunTimer>0 ? '#93c5fd' : '#4fd1c5';
+    if(playerStunTimer>0){ ctx.font='11px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#93c5fd'; ctx.fillText('❄️', player.x, player.y-16); }
+    if(playerFireTimer>0){ ctx.font='11px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ff8c42'; ctx.fillText('🔥', player.x, player.y-16); }
+    drawCharacter(player.x,player.y,PLAYER_R, playerCol, playerPhase, playerStunTimer<=0, 1);
     for(const p of particles){
-      ctx.globalAlpha = Math.max(0,1-p.age/p.life);
-      ctx.fillStyle=p.color;
-      ctx.fillRect(p.x-2,p.y-2,4,4);
+      ctx.globalAlpha=Math.max(0,1-p.age/p.life);
+      ctx.fillStyle=p.color; ctx.fillRect(p.x-2,p.y-2,4,4);
       ctx.globalAlpha=1;
     }
-    // vignette
-    const vg = ctx.createRadialGradient(canvas.width/2,canvas.height/2,canvas.height*0.25,canvas.width/2,canvas.height/2,canvas.height*0.75);
+    const vg=ctx.createRadialGradient(canvas.width/2,canvas.height/2,canvas.height*0.25,canvas.width/2,canvas.height/2,canvas.height*0.75);
     vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.35)');
     ctx.fillStyle=vg; ctx.fillRect(0,0,canvas.width,canvas.height);
   }
-  function now_phase(){ return performance.now()/120; }
 
   metaReset();
   requestAnimationFrame(loop);
