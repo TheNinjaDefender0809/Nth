@@ -11,7 +11,7 @@
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
-  #app{display:flex;flex-direction:column;height:100%;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+  #app{position:fixed;top:0;left:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
   #hud{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:13px;}
   #hud .title{font-weight:800;color:var(--thief);letter-spacing:1px;}
   #hudRight{display:flex;gap:14px;align-items:center;}
@@ -38,10 +38,92 @@
   #overlay h2{margin:0 0 8px;font-size:24px;}
   #overlay p{margin:0 0 18px;opacity:0.8;font-size:13px;max-width:280px;}
   #overlay.collapse h2{color:var(--cop);}
+  .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+          text-align:center;overflow:hidden;padding:24px;}
+  .bgWrap{position:absolute;inset:0;overflow:hidden;pointer-events:none;}
+  .bgchar{position:absolute;width:110px;height:110px;border-radius:50%;filter:blur(28px);opacity:0.2;
+          transition:opacity 2s;}
+  .homeTitle{font-size:64px;font-weight:800;letter-spacing:3px;margin:0 0 2px;z-index:1;position:relative;
+             color:var(--thief); animation:titleShift 6s ease-in-out infinite;}
+  .thSup{font-size:0.45em;vertical-align:super;}
+  @keyframes titleShift{0%,100%{color:#4fd1c5;}33%{color:#3fb8ae;}66%{color:#6ee7d8;}}
+  .homeTitle::after{content:'';position:absolute;top:-20px;bottom:-20px;left:-40%;width:60%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,0.10),transparent);
+    animation:smokepass 5s linear infinite; pointer-events:none;}
+  @keyframes smokepass{0%{left:-60%;}100%{left:140%;}}
+  .homeSub{font-size:11px;letter-spacing:3px;opacity:0.55;margin:0 0 10px;z-index:1;text-transform:uppercase;}
+  .homeTag{opacity:0.7;font-size:13px;max-width:320px;margin:0 0 24px;z-index:1;}
+  .glimpseWrap{height:24px;position:relative;width:100%;max-width:320px;margin-bottom:28px;z-index:1;}
+  .glimpse{position:absolute;inset:0;font-size:13px;opacity:0;animation:glimpsefade 9s infinite;}
+  .g1{animation-delay:0s;} .g2{animation-delay:3s;} .g3{animation-delay:6s;}
+  @keyframes glimpsefade{0%,100%{opacity:0;}5%,28%{opacity:0.85;}33%{opacity:0;}}
+  .playBtn{background:var(--thief);color:#04201d;border:none;padding:20px 64px;border-radius:16px;
+           font-size:18px;font-weight:800;letter-spacing:1px;z-index:1;box-shadow:0 0 28px rgba(79,209,197,0.4);}
+  .skipBtn{background:rgba(255,255,255,0.06);color:var(--text);border:1px solid rgba(255,255,255,0.18);
+           padding:10px 22px;border-radius:10px;font-size:12px;margin-top:14px;z-index:1;}
+  .adSlot{position:absolute;bottom:10px;font-size:10px;opacity:0.25;z-index:1;}
+  .settingsBtn{position:absolute;top:16px;right:16px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);
+               color:var(--text);width:36px;height:36px;border-radius:50%;font-size:16px;z-index:2;}
+  .tutCard{max-width:340px;z-index:1;}
+  .tutCard h2{color:var(--thief);margin-bottom:12px;}
+  .tutCard p{opacity:0.85;font-size:14px;line-height:1.6;margin-bottom:22px;}
+  .setLbl{display:block;font-size:11px;opacity:0.6;margin:14px 0 6px;text-align:left;}
+  #settingsUsername{display:block;margin:0 auto;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);
+                 background:rgba(255,255,255,0.06);color:var(--text);font-size:13px;width:200px;}
+  #musicVol,#sfxVol{width:220px;}
+  #usernameInput{display:block;margin:0 auto 18px;padding:10px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);
+                 background:rgba(255,255,255,0.06);color:var(--text);font-size:14px;text-align:center;width:220px;}
 </style>
 </head>
 <body>
-<div id="app">
+<div id="homeScreen" class="screen">
+  <div id="bgWrap" class="bgWrap"></div>
+  <button id="settingsBtn" class="settingsBtn">⚙</button>
+  <h1 class="homeTitle">N<span class="thSup">TH</span></h1>
+  <div class="homeSub">The Doom Loop</div>
+  <p class="homeTag">You stole a time machine which broke in the process. Escape this high security facility using your replicas (ECHOES).</p>
+  <div class="glimpseWrap">
+    <div class="glimpse g1">🔑 Find the key before the cop finds you</div>
+    <div class="glimpse g2">👻 Every failed run becomes an Echo</div>
+    <div class="glimpse g3">🚔 Bait the cop away with your past selves</div>
+  </div>
+  <button id="playBtn" class="playBtn">PLAY</button>
+  <div class="adSlot">Ad space</div>
+</div>
+
+<div id="settingsModal" class="screen" style="display:none;background:rgba(5,5,10,0.92);">
+  <div class="tutCard">
+    <h2>Settings</h2>
+    <label class="setLbl">Username</label>
+    <input id="settingsUsername" maxlength="16"/>
+    <label class="setLbl">Music volume</label>
+    <input id="musicVol" type="range" min="0" max="100" value="60"/>
+    <label class="setLbl">Sound effects volume</label>
+    <input id="sfxVol" type="range" min="0" max="100" value="80"/>
+    <button id="settingsTutBtn" class="btn playBtn" style="margin-top:10px;">Play Tutorial</button>
+    <button id="settingsCloseBtn" class="btn playBtn" style="margin-top:10px;background:transparent;color:var(--text);border:1px solid rgba(255,255,255,0.2);">Close</button>
+  </div>
+</div>
+
+<div id="usernameScreen" class="screen" style="display:none;">
+  <div class="tutCard">
+    <h2>What should the cop call you?</h2>
+    <input id="usernameInput" maxlength="16" placeholder="Enter a name"/>
+    <button id="usernameBtn" class="btn playBtn">Begin</button>
+  </div>
+</div>
+
+<div id="tutorialIntro" class="screen" style="display:none;">
+  <div class="tutCard">
+    <h2 id="tutTitle"></h2>
+    <p id="tutText"></p>
+    <button id="tutStartBtn" class="btn playBtn">Start</button>
+    <button id="skipTutBtn" class="btn skipBtn">Skip tutorial</button>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
+
   <div id="hud">
     <div class="title">NTH</div>
     <div id="hudRight">
@@ -62,7 +144,10 @@
   </div>
   <div id="controls">
     <div id="joyzone"><div id="joystick"></div></div>
-    <button class="btn" id="resetBtn">RESET</button>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+      <button class="btn" id="homeBtn" style="background:rgba(255,255,255,0.06);">HOME</button>
+      <button class="btn" id="resetBtn">RESET</button>
+    </div>
   </div>
 </div>
 
@@ -71,6 +156,19 @@
   const CELL=28, COLS=22, ROWS=16;
   const canvas = document.getElementById('c');
   canvas.width = COLS*CELL; canvas.height = ROWS*CELL;
+  function fitCanvas(){
+    const appEl = document.getElementById('app');
+    appEl.style.width = window.innerWidth+'px';
+    appEl.style.height = window.innerHeight+'px';
+    const stage = document.getElementById('stage');
+    const availW = stage.clientWidth - 4, availH = stage.clientHeight - 4;
+    const aspect = (COLS*CELL)/(ROWS*CELL);
+    let w = availW, h = availW/aspect;
+    if(h > availH){ h = availH; w = availH*aspect; }
+    canvas.style.width = Math.max(100,Math.floor(w))+'px';
+    canvas.style.height = Math.max(72,Math.floor(h))+'px';
+  }
+  window.addEventListener('resize', fitCanvas);
   const ctx = canvas.getContext('2d');
   const PLAYER_R=8, COP_R=9, ROOM_TIME=75, STUN_TIME=2.0, ICE_TIME=3.0, FIRE_TIME=3.0, COP_SLOW_TIME=2.0;
 
@@ -87,25 +185,25 @@
     const rng = mulberry32((seed*99991 + idx*7919 + 12345) >>> 0);
     const grid = [];
     for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
-    const doorIn = {x:0, y:Math.floor(ROWS/2)};
-    const doorOut = {x:COLS-1, y:Math.floor(ROWS/2)};
+    // entry/exit no longer pinned to dead-center of the edge - each gets its own random row,
+    // which alone forces more diagonal/curved travel across the room
+    const doorIn = {x:0, y:1+Math.floor(rng()*(ROWS-2))};
+    const doorOut = {x:COLS-1, y:1+Math.floor(rng()*(ROWS-2))};
     let cx=doorIn.x, cy=doorIn.y;
     grid[cy][cx]=0;
     const mainPath = new Set([cy+','+cx]);
     let guard=0;
-    // deliberate serpentine bias, not just a lowered rightward chance - the walk commits to a
-    // vertical direction for a few steps then flips, which reliably produces S/W shaped routes
-    // instead of leaving curviness to chance (a pure random walk can still come out near-straight)
+    // deliberate serpentine bias: commit to a vertical direction and sweep all the way to near
+    // the top or bottom edge before reversing, so every curve actually spans the room's full
+    // height instead of small wiggles confined near the middle (which wasted the top/bottom rows)
     let verticalDir = rng()<0.5 ? 1 : -1;
-    let stepsInDir = 0;
-    while((cx!==doorOut.x || cy!==doorOut.y) && guard<3000){
+    while((cx!==doorOut.x || cy!==doorOut.y) && guard<4000){
       guard++;
       let dx=0,dy=0;
-      if(cx<doorOut.x && rng()<0.3) dx=1;
+      if(cx<doorOut.x && rng()<0.22) dx=1;
       else {
-        stepsInDir++;
-        if(stepsInDir > 3+Math.floor(rng()*3)){ verticalDir*=-1; stepsInDir=0; }
         dy=verticalDir;
+        if((verticalDir===1 && cy>=ROWS-3) || (verticalDir===-1 && cy<=2)) verticalDir*=-1;
       }
       let nx = Math.max(0, Math.min(COLS-1, cx+dx));
       let ny = Math.max(1, Math.min(ROWS-2, cy+dy));
@@ -145,14 +243,17 @@
     function pickFloor(){ return floors[Math.floor(rng()*floors.length)] || doorOut; }
     let keyCell = pickFloor(), g2=0;
     while(((keyCell.x===doorIn.x&&keyCell.y===doorIn.y)||(keyCell.x===doorOut.x&&keyCell.y===doorOut.y)) && g2<20){ keyCell=pickFloor(); g2++; }
+    let copSpawn = pickFloor(), g3=0;
+    while(Math.hypot(copSpawn.x-doorIn.x, copSpawn.y-doorIn.y) < 4 && g3<20){ copSpawn=pickFloor(); g3++; }
     return {
       grid, doorIn, doorOut, keyCell, trapCells,
       patrol: [pickFloor(), pickFloor(), pickFloor()],
-      copSpawn: pickFloor()
+      copSpawn
     };
   }
 
   let metaSeed, roomIndex, roomsCleared, totalEchoesEver, livingEchoTotal, dirHist, metaFirstAttempt, roomFirstAttempt, roomKeyState, roomIceMelted;
+  let tutorialStage = 0, username = 'Thief';
   let room, player, cop, recording, roomTimeLeft, elapsed, gameOver, playerStunTimer, playerFireTimer;
   let roomEchoes, roomEchoAlive, roomEchoStunTimer, roomEchoTimeOffset, roomEchoFireTimer, roomArrestMarkers;
   let particles=[], playerPhase=0, playerTrail=[];
@@ -175,7 +276,7 @@
     player = {x:(room.doorIn.x+0.5)*CELL, y:(room.doorIn.y+0.5)*CELL};
     cop = {x:(room.copSpawn.x+0.5)*CELL, y:(room.copSpawn.y+0.5)*CELL, wp:0, state:'patrol',
            chaseType:null, chaseIdx:null, target:null, lastSeen:null, predictClock:0, slowTimer:0,
-           priorityType:null, priorityIdx:null};
+           priorityType:null, priorityIdx:null, graceTimer:1.8};
     recording=[]; roomTimeLeft=ROOM_TIME; elapsed=0; gameOver=false; playerStunTimer=0; playerFireTimer=0;
     particles=[]; playerTrail=[];
     hasKeyThisAttempt=false; keyPickupTimeThisAttempt=null;
@@ -290,11 +391,13 @@
   // what prevents a frozen cop re-colliding with the same non-target forever
   function updateCop(dt, echoPositions){
     if(cop.slowTimer>0) cop.slowTimer=Math.max(0,cop.slowTimer-dt);
+    if(cop.graceTimer>0) cop.graceTimer=Math.max(0,cop.graceTimer-dt);
     const lenient = roomFirstAttempt[roomIndex];
     const VISION = lenient ? 130 : 190;
     const CHASE_SPEED = lenient ? 52 : 74;
 
     let best=null, bestType=null, bestIdx=null;
+    if(cop.graceTimer<=0){
     for(const e of echoPositions){
       if(Math.hypot(e.x-cop.x,e.y-cop.y)<VISION && lineOfSight(cop.x,cop.y,e.x,e.y)){ best=e; bestType='echo'; bestIdx=e.ei; break; }
     }
@@ -313,6 +416,7 @@
         cop.predictClock=1.3;
       } else cop.state='search';
     }
+    } else { cop.state='patrol'; cop.priorityType=null; cop.priorityIdx=null; }
     let tx,ty,speed;
     if(cop.state==='chase'){
       if(cop.chaseType==='player'){ tx=player.x; ty=player.y; }
@@ -365,7 +469,7 @@
     roomEchoStunTimer[roomIndex]=roomEchoStunTimer[roomIndex]||[];
     roomEchoTimeOffset[roomIndex]=roomEchoTimeOffset[roomIndex]||[];
     roomEchoFireTimer[roomIndex]=roomEchoFireTimer[roomIndex]||[];
-    if(roomEchoes[roomIndex].length>=6) return -1;
+    if(roomEchoes[roomIndex].length>=10) return -1;
     roomEchoes[roomIndex].push({path:recording.slice(), keyPickupTime:keyPickupTimeThisAttempt});
     roomEchoAlive[roomIndex].push(true);
     roomEchoStunTimer[roomIndex].push(0);
@@ -382,9 +486,9 @@
     const ov=document.getElementById('overlay');
     ov.classList.add('collapse');
     document.getElementById('ovTitle').textContent='Every Echo Got Arrested';
-    document.getElementById('ovText').textContent=`Timeline collapses. You reached room ${roomIndex+1}. Starting fresh.`;
+    document.getElementById('ovText').textContent=`Timeline collapses. Try Again (${username}).`;
     ov.style.display='flex';
-    document.getElementById('ovBtn').onclick=()=>{ metaReset(); };
+    document.getElementById('ovBtn').onclick=()=>{ showScreen('homeScreen'); };
   }
 
   function endAttempt(reason){
@@ -398,7 +502,7 @@
       const otherLiving = livingEchoTotal - (newIdx>=0?1:0);
       if(otherLiving<=0){
         if(newIdx>=0){ roomEchoAlive[roomIndex][newIdx]=false; livingEchoTotal--; }
-        showCollapse();
+        showCollapse(); sfxCollapse();
         return;
       }
     }
@@ -414,7 +518,7 @@
     document.getElementById('ovTitle').textContent=m[0];
     document.getElementById('ovText').textContent=m[1];
     ov.style.display='flex';
-    document.getElementById('ovBtn').onclick=()=>{ enterRoom(roomIndex); };
+    document.getElementById('ovBtn').onclick=()=>{ sfxClick(); enterRoom(roomIndex); };
   }
 
   function clearRoom(){
@@ -422,7 +526,7 @@
     roomFirstAttempt[roomIndex]=false;
     finalizeRoomEcho(false);
     roomsCleared++;
-    toast(`ROOM ${roomIndex+1} CLEARED`);
+    toast(`ROOM ${roomIndex+1} CLEARED`); sfxRoomClear();
     spawnBurst(player.x, player.y, '#c084fc', 18);
     enterRoom(roomIndex+1);
   }
@@ -442,7 +546,17 @@
   const keys={};
   window.addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
   window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
-  document.getElementById('resetBtn').addEventListener('click', ()=> endAttempt('reset'));
+  function restartRoom(){
+    if(gameOver) return;
+    sfxClick();
+    if(tutorialStage>0){ enterTutorial(tutorialStage); } else { enterRoom(roomIndex); }
+  }
+  document.getElementById('resetBtn').addEventListener('click', restartRoom);
+  document.getElementById('homeBtn').addEventListener('click', ()=>{
+    sfxClick(); stopMusic();
+    document.getElementById('overlay').style.display='none';
+    showScreen('homeScreen');
+  });
 
   function getEchoPos(path, t){
     if(t<=path[0].t) return path[0];
@@ -460,7 +574,7 @@
 
       if(playerFireTimer>0){
         playerFireTimer-=dt;
-        if(playerFireTimer<=0){ spawnBurst(player.x,player.y,'#ff8c42',14); endAttempt('fire'); }
+        if(playerFireTimer<=0){ spawnBurst(player.x,player.y,'#ff8c42',14); if(tutorialStage>0) tutorialCaught(); else endAttempt('fire'); }
       }
 
       if(!gameOver){
@@ -501,7 +615,7 @@
       for(const e of echoPositions){
         if(fireArr[e.ei]>0){
           fireArr[e.ei]-=dt;
-          if(fireArr[e.ei]<=0) killEchoForReal(e.ei, e.x, e.y, '#ff8c42', 'AN ECHO BURNED');
+          if(fireArr[e.ei]<=0){ killEchoForReal(e.ei, e.x, e.y, '#ff8c42', 'AN ECHO BURNED'); sfxFire(); }
         }
       }
       // trap contact for still-living echoes: spike kills for real, fire ignites, ice freezes+melts
@@ -513,9 +627,9 @@
           if(t.type==='ice' && iceState[ti]) continue;
           const tx=(t.x+0.5)*CELL, ty=(t.y+0.5)*CELL;
           if(Math.hypot(e.x-tx,e.y-ty) < PLAYER_R+7){
-            if(t.type==='spike'){ killEchoForReal(e.ei,e.x,e.y,'#ff4d6d','AN ECHO WAS IMPALED'); }
+            if(t.type==='spike'){ killEchoForReal(e.ei,e.x,e.y,'#ff4d6d','AN ECHO WAS IMPALED'); sfxSpike(); }
             else if(t.type==='fire' && fireArr[e.ei]<=0){ fireArr[e.ei]=FIRE_TIME; toast('AN ECHO CAUGHT FIRE'); }
-            else if(t.type==='ice' && stunArr[e.ei]<=0){ stunArr[e.ei]=ICE_TIME; iceState[ti]=true; toast('AN ECHO FROZE — ice melts'); spawnBurst(e.x,e.y,'#93c5fd',10); }
+            else if(t.type==='ice' && stunArr[e.ei]<=0){ stunArr[e.ei]=ICE_TIME; iceState[ti]=true; toast('AN ECHO FROZE — ice melts'); spawnBurst(e.x,e.y,'#93c5fd',10); sfxFreeze(); }
             break;
           }
         }
@@ -539,11 +653,12 @@
       if(!gameOver && !hasKeyThisAttempt && Math.hypot(player.x-keyPos.x,player.y-keyPos.y)<PLAYER_R+8){
         hasKeyThisAttempt=true; keyPickupTimeThisAttempt=elapsed;
         spawnBurst(player.x,player.y,'#f6c453',10);
-        toast('KEY PICKED UP');
+        toast('KEY PICKED UP'); sfxKey();
         document.getElementById('keyIcon').classList.add('held');
       }
 
-      updateCop(dt, liveEchoPositions);
+      const copDisabled = (tutorialStage===1 || tutorialStage===2);
+      if(!copDisabled) updateCop(dt, liveEchoPositions);
 
       for(const e of liveEchoPositions){
         if(!aliveArr[e.ei]) continue;
@@ -552,13 +667,13 @@
           if(isPriority){
             aliveArr[e.ei]=false; livingEchoTotal--; renderLives();
             spawnBurst(e.x,e.y,'#ff4d6d',14);
-            toast('ECHO ARRESTED');
+            toast('ECHO ARRESTED'); sfxArrest();
             roomArrestMarkers[roomIndex]=roomArrestMarkers[roomIndex]||[];
             roomArrestMarkers[roomIndex].push({x:e.x,y:e.y});
             if(e.ei===ks.designatedCarrierEi && !hasKeyThisAttempt){ ks.groundPos={x:e.x,y:e.y}; }
           } else if((stunArr[e.ei]||0)<=0){
             stunArr[e.ei]=STUN_TIME;
-            toast('ECHO STUNNED');
+            toast('ECHO STUNNED'); sfxStun();
             spawnBurst(e.x,e.y,'#93c5fd',10);
           }
         }
@@ -566,7 +681,7 @@
       const renderEchoPositions = liveEchoPositions.filter(e=>aliveArr[e.ei]);
 
       if(!gameOver){
-        const playerTouchesCop = Math.hypot(player.x-cop.x, player.y-cop.y) < PLAYER_R+COP_R;
+        const playerTouchesCop = !copDisabled && cop.graceTimer<=0 && Math.hypot(player.x-cop.x, player.y-cop.y) < PLAYER_R+COP_R;
         let trapHit=null;
         for(let ti=0; ti<room.trapCells.length; ti++){
           const t=room.trapCells[ti];
@@ -575,17 +690,20 @@
           if(Math.hypot(player.x-tx,player.y-ty) < PLAYER_R+7){ trapHit={t,ti}; break; }
         }
         if(playerTouchesCop){
-          const isPriorityPlayer = cop.priorityType==='player' || liveEchoPositions.length===0;
-          if(isPriorityPlayer){ spawnBurst(player.x,player.y,'#ff4d6d',18); endAttempt('caught'); }
-          else if(playerStunTimer<=0){ playerStunTimer=STUN_TIME; toast('YOU GOT STUNNED'); spawnBurst(player.x,player.y,'#93c5fd',10); }
+          if(tutorialStage>0){ spawnBurst(player.x,player.y,'#ff4d6d',14); tutorialCaught(); }
+          else {
+            const isPriorityPlayer = !(roomEchoAlive[roomIndex]||[]).some(a=>a); // an echo still alive means it's not the player's turn yet
+            if(isPriorityPlayer){ spawnBurst(player.x,player.y,'#ff4d6d',18); sfxArrest(); endAttempt('caught'); }
+            else if(playerStunTimer<=0){ playerStunTimer=STUN_TIME; toast('YOU GOT STUNNED'); spawnBurst(player.x,player.y,'#93c5fd',10); sfxStun(); }
+          }
         } else if(trapHit){
           const {t,ti}=trapHit;
-          if(t.type==='spike'){ spawnBurst(player.x,player.y,'#ff4d6d',14); endAttempt('spike'); }
-          else if(t.type==='fire' && playerFireTimer<=0){ playerFireTimer=FIRE_TIME; toast('YOU CAUGHT FIRE'); }
-          else if(t.type==='ice' && playerStunTimer<=0){ playerStunTimer=ICE_TIME; iceState[ti]=true; toast('FROZEN — ice melts'); spawnBurst(player.x,player.y,'#93c5fd',10); }
+          if(t.type==='spike'){ spawnBurst(player.x,player.y,'#ff4d6d',14); sfxSpike(); if(tutorialStage>0) tutorialCaught(); else endAttempt('spike'); }
+          else if(t.type==='fire' && playerFireTimer<=0){ playerFireTimer=FIRE_TIME; toast('YOU CAUGHT FIRE'); sfxFire(); }
+          else if(t.type==='ice' && playerStunTimer<=0){ playerStunTimer=ICE_TIME; iceState[ti]=true; toast('FROZEN — ice melts'); spawnBurst(player.x,player.y,'#93c5fd',10); sfxFreeze(); }
         } else if(hasKeyThisAttempt && Math.floor(player.x/CELL)===room.doorOut.x && Math.floor(player.y/CELL)===room.doorOut.y){
-          clearRoom();
-        } else if(roomTimeLeft<=0){
+          if(tutorialStage>0) advanceTutorial(); else clearRoom();
+        } else if(roomTimeLeft<=0 && tutorialStage===0){
           endAttempt('timeout');
         }
       }
@@ -690,7 +808,241 @@
     ctx.fillStyle=vg; ctx.fillRect(0,0,canvas.width,canvas.height);
   }
 
-  metaReset();
+  function showScreen(id){
+    ['homeScreen','settingsModal','tutorialIntro','usernameScreen','app'].forEach(s=>{
+      document.getElementById(s).style.display = (s===id) ? 'flex' : 'none';
+    });
+    if(id==='app') fitCanvas();
+    if(id==='homeScreen') playHomeMusic();
+  }
+
+  function makeTutorialRoom(stage){
+    const doorIn={x:0, y:Math.floor(ROWS/2)}, doorOut={x:COLS-1, y:Math.floor(ROWS/2)};
+    const grid=[];
+    for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
+    for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++) grid[y][x]=0;
+    grid[doorIn.y][doorIn.x]=0; grid[doorOut.y][doorOut.x]=0;
+    let trapCells=[], keyCell=doorOut, copSpawn={x:COLS-3,y:doorIn.y};
+    if(stage===2){
+      keyCell = {x:Math.floor(COLS/2)-2, y:doorIn.y-3};
+      trapCells = [
+        {x:Math.floor(COLS/2), y:doorIn.y, type:'spike'},
+        {x:Math.floor(COLS/2)+4, y:doorIn.y+3, type:'fire'},
+        {x:Math.floor(COLS/2)+8, y:doorIn.y-3, type:'ice'}
+      ];
+    }
+    if(stage===3){
+      keyCell = {x:Math.floor(COLS*0.55), y:doorIn.y+3};
+      copSpawn = {x:Math.floor(COLS*0.7), y:doorIn.y};
+    }
+    return {
+      grid, doorIn, doorOut, keyCell, trapCells,
+      patrol:[{x:3,y:2},{x:COLS-3,y:2},{x:3,y:ROWS-3},{x:COLS-3,y:ROWS-3}],
+      copSpawn
+    };
+  }
+
+  function enterTutorial(stage){
+    tutorialStage = stage;
+    roomIndex = 999;
+    room = makeTutorialRoom(stage);
+    player = {x:(room.doorIn.x+0.5)*CELL, y:(room.doorIn.y+0.5)*CELL};
+    cop = {x: stage===3 ? (room.copSpawn.x+0.5)*CELL : -500, y: stage===3 ? (room.copSpawn.y+0.5)*CELL : -500, wp:0, state:'patrol',
+           chaseType:null, chaseIdx:null, target:null, lastSeen:null, predictClock:0, slowTimer:0,
+           priorityType:null, priorityIdx:null, graceTimer: stage===3?1.8:0};
+    recording=[]; roomTimeLeft=999; elapsed=0; gameOver=false; playerStunTimer=0; playerFireTimer=0;
+    particles=[]; playerTrail=[];
+    hasKeyThisAttempt = (stage===1);
+    keyPickupTimeThisAttempt=null;
+    roomKeyState[999] = {designatedCarrierEi:null, groundPos:{x:(room.keyCell.x+0.5)*CELL, y:(room.keyCell.y+0.5)*CELL}};
+    roomIceMelted[999] = room.trapCells.map(()=>false);
+    document.getElementById('overlay').style.display='none';
+    document.getElementById('keyIcon').classList.toggle('held', hasKeyThisAttempt);
+    setStatus(stage===1 ? 'Reach the door.' : stage===2 ? 'Grab the key, then reach the door.' : 'Reach the door - use an Echo to distract the cop if you can.');
+    document.getElementById('lives').innerHTML='';
+    showScreen('app');
+  }
+
+  function advanceTutorial(){
+    if(tutorialStage<3){
+      showTutorialDialogue(tutorialStage+1);
+    } else {
+      tutorialStage=0;
+      showTutorialDone();
+    }
+  }
+
+  function tutorialCaught(){
+    toast('Caught! Try again.');
+    player.x=(room.doorIn.x+0.5)*CELL; player.y=(room.doorIn.y+0.5)*CELL;
+    cop.x=(room.copSpawn.x+0.5)*CELL; cop.y=(room.copSpawn.y+0.5)*CELL; cop.state='patrol'; cop.graceTimer=1.8;
+  }
+
+  const tutorialCopy = {
+    1: ["Your time machine is broken, but it still works well enough. Just reach the door - nothing dangerous here yet."],
+    2: ["Walk over the key to pick it up automatically, then find the door - it's locked without it. Watch for hazards: spikes end a run instantly, fire ignites you and kills in 3 seconds, ice freezes you for 3 seconds then melts for good. Every time a run ends, it's recorded as an Echo - a ghost of yourself that repeats that exact run next time."],
+    3: ["He always goes after the oldest Echo he can see before ever bothering with you. Once you've got an Echo, lead the cop toward it to pull him off your path. Try it here."]
+  };
+  const tutorialTitles = { 1: `Welcome, ${username}`, 2: "Grab the key", 3: "Meet the cop" };
+  let tutorialFromSettings = false;
+  function showTutorialDialogue(stage){
+    document.getElementById('tutTitle').textContent = stage===1 ? `Welcome, ${username}` : tutorialTitles[stage];
+    document.getElementById('tutText').textContent = tutorialCopy[stage][0];
+    document.getElementById('tutStartBtn').textContent = 'Start';
+    document.getElementById('skipTutBtn').style.display = '';
+    showScreen('tutorialIntro');
+    document.getElementById('tutStartBtn').onclick = ()=>{ sfxClick(); enterTutorial(stage); };
+  }
+  function showTutorialDone(){
+    document.getElementById('tutTitle').textContent = "You're all set!";
+    document.getElementById('tutText').textContent = "Time to put it to use.";
+    document.getElementById('tutStartBtn').textContent = 'Continue';
+    document.getElementById('skipTutBtn').style.display = 'none';
+    showScreen('tutorialIntro');
+    document.getElementById('tutStartBtn').onclick = ()=>{
+      sfxClick();
+      if(tutorialFromSettings){ tutorialFromSettings=false; showScreen('homeScreen'); }
+      else beginRealGame();
+    };
+  }
+
+  let hasOnboarded = false;
+  function beginRealGame(){
+    hasOnboarded = true;
+    showScreen('app');
+    metaReset();
+    setStatus(`Alright, ${username} - the cop is still just watching you here...`);
+    playGameMusic();
+  }
+
+  document.getElementById('playBtn').addEventListener('click', ()=>{
+    sfxClick();
+    if(hasOnboarded){ beginRealGame(); return; }
+    showScreen('usernameScreen');
+  });
+  document.getElementById('skipTutBtn').addEventListener('click', ()=>{ sfxClick(); beginRealGame(); });
+  document.getElementById('usernameBtn').addEventListener('click', ()=>{
+    const v = document.getElementById('usernameInput').value.trim();
+    if(v) username = v;
+    sfxClick();
+    showTutorialDialogue(1);
+  });
+
+  // settings modal
+  document.getElementById('settingsBtn').addEventListener('click', ()=>{
+    sfxClick();
+    document.getElementById('settingsUsername').value = username;
+    showScreen('settingsModal');
+  });
+  document.getElementById('settingsCloseBtn').addEventListener('click', ()=>{
+    sfxClick();
+    const v = document.getElementById('settingsUsername').value.trim();
+    if(v) username = v;
+    showScreen('homeScreen');
+  });
+  document.getElementById('settingsTutBtn').addEventListener('click', ()=>{
+    sfxClick();
+    const v = document.getElementById('settingsUsername').value.trim();
+    if(v) username = v;
+    showTutorialDialogue(1);
+  });
+  document.getElementById('musicVol').addEventListener('input', e=> setMusicVol(e.target.value/100));
+  document.getElementById('sfxVol').addEventListener('input', e=> setSfxVol(e.target.value/100));
+  document.getElementById('usernameInput').addEventListener('keydown', ()=> tone(700,0.03,'square',0.08));
+  document.getElementById('settingsUsername').addEventListener('keydown', ()=> tone(700,0.03,'square',0.08));
+
+  // ---- randomized drifting background blobs (spawn anywhere, random colors, random lifespans) ----
+  const bgWrap = document.getElementById('bgWrap');
+  const bgColors = ['#4fd1c5','#ff4d6d','#c084fc','#ff8c42','#f6e35a'];
+  function spawnBgBlob(){
+    const el = document.createElement('div');
+    el.className='bgchar';
+    const color = bgColors[Math.floor(Math.random()* (Math.random()<0.3?bgColors.length:3))];
+    el.style.background = color;
+    let x = Math.random()*90, y = Math.random()*90;
+    el.style.left = x+'%'; el.style.top = y+'%';
+    bgWrap.appendChild(el);
+    requestAnimationFrame(()=> el.style.opacity='0.22');
+    const dur = 4000+Math.random()*4000;
+    const dx = (Math.random()*40-20), dy=(Math.random()*40-20);
+    el.animate([
+      {transform:'translate(0,0)'},
+      {transform:`translate(${dx}vw, ${dy}vh)`}
+    ], {duration:dur, easing:'ease-in-out'});
+    setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.remove(),2000); }, dur-500);
+  }
+  function bgLoop(){ spawnBgBlob(); setTimeout(bgLoop, 1400+Math.random()*1400); }
+  bgLoop();
+
+  // ---- procedural audio (no external files) - lazily created on first interaction ----
+  let actx=null, musicGain=null, sfxGain=null, musicNodes=[];
+  let musicVolLevel=0.6, sfxVolLevel=0.8;
+  function ensureAudio(){
+    if(actx){ if(actx.state==='suspended') actx.resume(); return; }
+    actx = new (window.AudioContext||window.webkitAudioContext)();
+    musicGain = actx.createGain(); musicGain.gain.value=musicVolLevel; musicGain.connect(actx.destination);
+    sfxGain = actx.createGain(); sfxGain.gain.value=sfxVolLevel; sfxGain.connect(actx.destination);
+  }
+  function setMusicVol(v){ musicVolLevel=v; if(musicGain) musicGain.gain.value=v; }
+  function setSfxVol(v){ sfxVolLevel=v; if(sfxGain) sfxGain.gain.value=v; }
+  function tone(freq,dur,type,vol,delay){
+    ensureAudio();
+    const t0=actx.currentTime+(delay||0);
+    const osc=actx.createOscillator(), g=actx.createGain();
+    osc.type=type||'sine'; osc.frequency.setValueAtTime(freq,t0);
+    g.gain.setValueAtTime(0,t0); g.gain.linearRampToValueAtTime((vol||0.3),t0+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001,t0+dur);
+    osc.connect(g); g.connect(sfxGain);
+    osc.start(t0); osc.stop(t0+dur+0.05);
+  }
+  function noiseBurst(dur,vol){
+    ensureAudio();
+    const bufferSize=actx.sampleRate*dur;
+    const buffer=actx.createBuffer(1,bufferSize,actx.sampleRate);
+    const data=buffer.getChannelData(0);
+    for(let i=0;i<bufferSize;i++) data[i]=(Math.random()*2-1)*(1-i/bufferSize);
+    const src=actx.createBufferSource(); src.buffer=buffer;
+    const g=actx.createGain(); g.gain.value=vol||0.25;
+    src.connect(g); g.connect(sfxGain);
+    src.start();
+  }
+  function sfxClick(){ tone(440,0.08,'square',0.15); }
+  function sfxKey(){ tone(880,0.1,'sine',0.25); tone(1320,0.12,'sine',0.2,0.08); }
+  function sfxArrest(){ tone(220,0.25,'sawtooth',0.25); tone(140,0.3,'sawtooth',0.2,0.08); }
+  function sfxStun(){ tone(1200,0.1,'sine',0.2); tone(1600,0.1,'sine',0.15,0.06); }
+  function sfxFreeze(){ tone(1800,0.15,'triangle',0.2); tone(2200,0.15,'triangle',0.15,0.05); }
+  function sfxFire(){ noiseBurst(0.4,0.2); }
+  function sfxSpike(){ tone(180,0.2,'square',0.25); noiseBurst(0.15,0.15); }
+  function sfxRoomClear(){ [523,659,784,1047].forEach((f,i)=>tone(f,0.18,'sine',0.22,i*0.09)); }
+  function sfxCollapse(){ tone(110,0.8,'sawtooth',0.25); tone(80,1.0,'sawtooth',0.2,0.15); }
+
+  let homeMusicTimer=null, gameMusicTimer=null;
+  function stopMusic(){
+    if(homeMusicTimer){ clearInterval(homeMusicTimer); homeMusicTimer=null; }
+    if(gameMusicTimer){ clearInterval(gameMusicTimer); gameMusicTimer=null; }
+  }
+  function playHomeMusic(){
+    ensureAudio(); stopMusic();
+    const notes=[220,261.6,196,246.9];
+    let i=0;
+    homeMusicTimer=setInterval(()=>{ tone(notes[i%notes.length],1.6,'sine',0.06); i++; }, 2200);
+  }
+  function playGameMusic(){
+    ensureAudio(); stopMusic();
+    let i=0;
+    gameMusicTimer=setInterval(()=>{
+      tone(110,0.15,'square',0.05);
+      if(i%2===0) tone(146.8,0.12,'square',0.04,0.2);
+      i++;
+    }, 480);
+  }
+
+  roomEchoes={}; roomEchoAlive={}; roomEchoStunTimer={}; roomEchoTimeOffset={}; roomEchoFireTimer={};
+  roomKeyState={}; roomIceMelted={}; roomArrestMarkers={}; roomFirstAttempt={};
+  dirHist = new Array(8).fill(0);
+  gameOver = true; // nothing to simulate until Play/tutorial/username actually starts a room
+  showScreen('homeScreen');
+  document.addEventListener('click', function firstClick(){ ensureAudio(); playHomeMusic(); document.removeEventListener('click',firstClick); }, {once:true});
   requestAnimationFrame(loop);
 })();
 </script>
