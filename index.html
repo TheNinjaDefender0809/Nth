@@ -43,22 +43,25 @@
   .bgWrap{position:absolute;inset:0;overflow:hidden;pointer-events:none;}
   .bgchar{position:absolute;width:110px;height:110px;border-radius:50%;filter:blur(28px);opacity:0.2;
           transition:opacity 2s;}
-  .homeTitle{font-size:64px;font-weight:800;letter-spacing:3px;margin:0 0 2px;z-index:1;position:relative;
-             color:var(--thief); animation:titleShift 6s ease-in-out infinite;}
+  .homeTitle{font-size:80px;font-weight:800;letter-spacing:3px;margin:0 0 2px;z-index:1;position:relative;
+             animation:titleShift 14s ease-in-out infinite;}
   .thSup{font-size:0.45em;vertical-align:super;}
-  @keyframes titleShift{0%,100%{color:#4fd1c5;}33%{color:#3fb8ae;}66%{color:#6ee7d8;}}
-  .homeTitle::after{content:'';position:absolute;top:-20px;bottom:-20px;left:-40%;width:60%;
-    background:linear-gradient(90deg,transparent,rgba(255,255,255,0.10),transparent);
-    animation:smokepass 5s linear infinite; pointer-events:none;}
-  @keyframes smokepass{0%{left:-60%;}100%{left:140%;}}
+  @keyframes titleShift{0%,100%{color:#4fd1c5;}25%{color:#22d3ee;}50%{color:#10b981;}75%{color:#38bdf8;}}
   .homeSub{font-size:11px;letter-spacing:3px;opacity:0.55;margin:0 0 10px;z-index:1;text-transform:uppercase;}
   .homeTag{opacity:0.7;font-size:13px;max-width:320px;margin:0 0 24px;z-index:1;}
   .glimpseWrap{height:24px;position:relative;width:100%;max-width:320px;margin-bottom:28px;z-index:1;}
   .glimpse{position:absolute;inset:0;font-size:13px;opacity:0;animation:glimpsefade 9s infinite;}
   .g1{animation-delay:0s;} .g2{animation-delay:3s;} .g3{animation-delay:6s;}
   @keyframes glimpsefade{0%,100%{opacity:0;}5%,28%{opacity:0.85;}33%{opacity:0;}}
-  .playBtn{background:var(--thief);color:#04201d;border:none;padding:20px 64px;border-radius:16px;
-           font-size:18px;font-weight:800;letter-spacing:1px;z-index:1;box-shadow:0 0 28px rgba(79,209,197,0.4);}
+  .playBtn{color:#04201d;border:none;padding:20px 64px;border-radius:16px;
+           font-size:18px;font-weight:800;letter-spacing:1px;z-index:1;
+           animation:btnShift 14s ease-in-out infinite;}
+  @keyframes btnShift{
+    0%,100%{background:#4fd1c5;box-shadow:0 0 28px rgba(79,209,197,0.4);}
+    25%{background:#22d3ee;box-shadow:0 0 28px rgba(34,211,238,0.4);}
+    50%{background:#10b981;box-shadow:0 0 28px rgba(16,185,129,0.4);}
+    75%{background:#38bdf8;box-shadow:0 0 28px rgba(56,189,248,0.4);}
+  }
   .skipBtn{background:rgba(255,255,255,0.06);color:var(--text);border:1px solid rgba(255,255,255,0.18);
            padding:10px 22px;border-radius:10px;font-size:12px;margin-top:14px;z-index:1;}
   .adSlot{position:absolute;bottom:10px;font-size:10px;opacity:0.25;z-index:1;}
@@ -256,7 +259,7 @@
   let tutorialStage = 0, username = 'Thief';
   let room, player, cop, recording, roomTimeLeft, elapsed, gameOver, playerStunTimer, playerFireTimer;
   let roomEchoes, roomEchoAlive, roomEchoStunTimer, roomEchoTimeOffset, roomEchoFireTimer, roomArrestMarkers;
-  let particles=[], playerPhase=0, playerTrail=[];
+  let particles=[], playerPhase=0, playerTrail=[], stepAccum=0;
   let hasKeyThisAttempt=false, keyPickupTimeThisAttempt=null;
 
   function metaReset(){
@@ -368,11 +371,25 @@
     while(prev[ck]){ path.unshift(prev[ck]); ck=key(prev[ck].x,prev[ck].y); }
     return path;
   }
+  // if a target's cell is a wall (e.g. a predicted/extrapolated point that overshoots past a
+  // corner), BFS can never reach it and the cop had no recovery - that was the persistent stuck
+  // bug. Snap any target to the nearest real floor cell before pathing to it.
+  function nearestFloor(cell){
+    if(!isWall(cell.x,cell.y)) return cell;
+    for(let r=1;r<10;r++){
+      for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+        const nx=cell.x+dx, ny=cell.y+dy;
+        if(!isWall(nx,ny)) return {x:nx,y:ny};
+      }
+    }
+    return cell;
+  }
   function stepToward(fromX,fromY,toX,toY){
-    const s=cellOf(fromX,fromY), e=cellOf(toX,toY);
+    const s=cellOf(fromX,fromY);
+    const e=nearestFloor(cellOf(toX,toY));
     if(s.x===e.x && s.y===e.y) return {x:toX,y:toY};
     const path=bfsPath(s,e);
-    if(!path || path.length<2) return {x:toX,y:toY};
+    if(!path || path.length<2) return {x:(e.x+0.5)*CELL, y:(e.y+0.5)*CELL};
     const nxt=path[1];
     return {x:(nxt.x+0.5)*CELL, y:(nxt.y+0.5)*CELL};
   }
@@ -413,8 +430,8 @@
         const dv=dominantDirVector(), PD=95;
         cop.target={x:cop.lastSeen.x+dv.x*PD, y:cop.lastSeen.y+dv.y*PD};
         cop.state=(dv.x||dv.y)?'predict':'search';
-        cop.predictClock=1.3;
-      } else cop.state='search';
+        cop.predictClock=1.3; cop.searchClock=3.0;
+      } else { cop.state='search'; cop.searchClock=3.0; }
     }
     } else { cop.state='patrol'; cop.priorityType=null; cop.priorityIdx=null; }
     let tx,ty,speed;
@@ -423,16 +440,17 @@
       else {
         const cur=echoPositions.find(e=>e.ei===cop.chaseIdx);
         if(cur){ tx=cur.x; ty=cur.y; cop.lastSeen={x:tx,y:ty}; }
-        else { tx=cop.lastSeen.x; ty=cop.lastSeen.y; cop.state='search'; }
+        else { tx=cop.lastSeen.x; ty=cop.lastSeen.y; cop.state='search'; cop.searchClock=3.0; }
       }
       speed=CHASE_SPEED;
     } else if(cop.state==='predict'){
       tx=cop.target.x; ty=cop.target.y; speed=82;
       cop.predictClock-=dt;
-      if(cop.predictClock<=0 || Math.hypot(cop.x-tx,cop.y-ty)<10) cop.state='search';
+      if(cop.predictClock<=0 || Math.hypot(cop.x-tx,cop.y-ty)<10){ cop.state='search'; cop.searchClock=3.0; }
     } else if(cop.state==='search' && cop.lastSeen){
       tx=cop.lastSeen.x; ty=cop.lastSeen.y; speed=lenient?45:58;
-      if(Math.hypot(cop.x-tx,cop.y-ty)<10){ cop.state='patrol'; cop.lastSeen=null; }
+      cop.searchClock=(cop.searchClock??3.0)-dt;
+      if(Math.hypot(cop.x-tx,cop.y-ty)<10 || cop.searchClock<=0){ cop.state='patrol'; cop.lastSeen=null; }
     } else {
       const wp=room.patrol[cop.wp]; tx=(wp.x+0.5)*CELL; ty=(wp.y+0.5)*CELL; speed=42;
       if(Math.hypot(cop.x-tx,cop.y-ty)<8) cop.wp=(cop.wp+1)%room.patrol.length;
@@ -590,6 +608,8 @@
           const m=Math.hypot(mx,my);
           tryMove(player, mx/m*90*dt, my/m*90*dt, PLAYER_R);
           playerPhase+=dt*9;
+          stepAccum+=dt;
+          if(stepAccum>0.27){ stepAccum=0; sfxStep(); }
         }
         trackMovement(mx,my,dt);
         recording.push({t:elapsed, x:player.x, y:player.y});
@@ -817,27 +837,30 @@
   }
 
   function makeTutorialRoom(stage){
-    const doorIn={x:0, y:Math.floor(ROWS/2)}, doorOut={x:COLS-1, y:Math.floor(ROWS/2)};
+    // confine the actual playable patch to a small 7x7 square centered in the grid, rather than
+    // using the whole big room - keeps tutorials compact instead of mostly empty space
+    const midY = Math.floor(ROWS/2), midX = Math.floor(COLS/2);
+    const left = midX-3, top = midY-3; // 7x7: left..left+6, top..top+6
+    const doorIn={x:left, y:midY}, doorOut={x:left+6, y:midY};
     const grid=[];
     for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
-    for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++) grid[y][x]=0;
-    grid[doorIn.y][doorIn.x]=0; grid[doorOut.y][doorOut.x]=0;
-    let trapCells=[], keyCell=doorOut, copSpawn={x:COLS-3,y:doorIn.y};
+    for(let y=top;y<=top+6;y++) for(let x=left;x<=left+6;x++) grid[y][x]=0;
+    let trapCells=[], keyCell=doorOut, copSpawn={x:left+5,y:top+1};
     if(stage===2){
-      keyCell = {x:Math.floor(COLS/2)-2, y:doorIn.y-3};
+      keyCell = {x:left+3, y:top+1};
       trapCells = [
-        {x:Math.floor(COLS/2), y:doorIn.y, type:'spike'},
-        {x:Math.floor(COLS/2)+4, y:doorIn.y+3, type:'fire'},
-        {x:Math.floor(COLS/2)+8, y:doorIn.y-3, type:'ice'}
+        {x:left+2, y:top+5, type:'spike'},
+        {x:left+4, y:top+2, type:'fire'},
+        {x:left+5, y:top+5, type:'ice'}
       ];
     }
     if(stage===3){
-      keyCell = {x:Math.floor(COLS*0.55), y:doorIn.y+3};
-      copSpawn = {x:Math.floor(COLS*0.7), y:doorIn.y};
+      keyCell = {x:left+3, y:top+5};
+      copSpawn = {x:left+5, y:top+1};
     }
     return {
       grid, doorIn, doorOut, keyCell, trapCells,
-      patrol:[{x:3,y:2},{x:COLS-3,y:2},{x:3,y:ROWS-3},{x:COLS-3,y:ROWS-3}],
+      patrol:[{x:left+1,y:top+1},{x:left+5,y:top+1},{x:left+1,y:top+5},{x:left+5,y:top+5}],
       copSpawn
     };
   }
@@ -920,7 +943,10 @@
     if(hasOnboarded){ beginRealGame(); return; }
     showScreen('usernameScreen');
   });
-  document.getElementById('skipTutBtn').addEventListener('click', ()=>{ sfxClick(); beginRealGame(); });
+  document.getElementById('skipTutBtn').addEventListener('click', ()=>{
+    sfxClick();
+    if(tutorialFromSettings){ tutorialFromSettings=false; showScreen('homeScreen'); } else beginRealGame();
+  });
   document.getElementById('usernameBtn').addEventListener('click', ()=>{
     const v = document.getElementById('usernameInput').value.trim();
     if(v) username = v;
@@ -944,6 +970,7 @@
     sfxClick();
     const v = document.getElementById('settingsUsername').value.trim();
     if(v) username = v;
+    tutorialFromSettings = true;
     showTutorialDialogue(1);
   });
   document.getElementById('musicVol').addEventListener('input', e=> setMusicVol(e.target.value/100));
@@ -1007,6 +1034,7 @@
     src.start();
   }
   function sfxClick(){ tone(440,0.08,'square',0.15); }
+  function sfxStep(){ tone(180+Math.random()*30,0.05,'triangle',0.06); }
   function sfxKey(){ tone(880,0.1,'sine',0.25); tone(1320,0.12,'sine',0.2,0.08); }
   function sfxArrest(){ tone(220,0.25,'sawtooth',0.25); tone(140,0.3,'sawtooth',0.2,0.08); }
   function sfxStun(){ tone(1200,0.1,'sine',0.2); tone(1600,0.1,'sine',0.15,0.06); }
@@ -1016,25 +1044,38 @@
   function sfxRoomClear(){ [523,659,784,1047].forEach((f,i)=>tone(f,0.18,'sine',0.22,i*0.09)); }
   function sfxCollapse(){ tone(110,0.8,'sawtooth',0.25); tone(80,1.0,'sawtooth',0.2,0.15); }
 
-  let homeMusicTimer=null, gameMusicTimer=null;
+  let activeMusicNodes=[];
   function stopMusic(){
-    if(homeMusicTimer){ clearInterval(homeMusicTimer); homeMusicTimer=null; }
-    if(gameMusicTimer){ clearInterval(gameMusicTimer); gameMusicTimer=null; }
+    activeMusicNodes.forEach(n=>{ try{ n.stop(); }catch(e){} });
+    activeMusicNodes=[];
   }
   function playHomeMusic(){
     ensureAudio(); stopMusic();
-    const notes=[220,261.6,196,246.9];
-    let i=0;
-    homeMusicTimer=setInterval(()=>{ tone(notes[i%notes.length],1.6,'sine',0.06); i++; }, 2200);
+    // a genuinely continuous soft pad (sustained oscillators + slow LFO), not a sequenced blip loop
+    const o1=actx.createOscillator(), o2=actx.createOscillator(), o3=actx.createOscillator();
+    o1.type='sine'; o2.type='sine'; o3.type='sine';
+    o1.frequency.value=220; o2.frequency.value=277.2; o3.frequency.value=329.6; // soft major triad
+    const g=actx.createGain(); g.gain.value=0;
+    g.gain.linearRampToValueAtTime(0.045, actx.currentTime+2);
+    const lfo=actx.createOscillator(); lfo.frequency.value=0.08;
+    const lfoGain=actx.createGain(); lfoGain.gain.value=0.015;
+    lfo.connect(lfoGain); lfoGain.connect(g.gain);
+    o1.connect(g); o2.connect(g); o3.connect(g); g.connect(musicGain);
+    o1.start(); o2.start(); o3.start(); lfo.start();
+    activeMusicNodes=[o1,o2,o3,lfo];
   }
   function playGameMusic(){
     ensureAudio(); stopMusic();
-    let i=0;
-    gameMusicTimer=setInterval(()=>{
-      tone(110,0.15,'square',0.05);
-      if(i%2===0) tone(146.8,0.12,'square',0.04,0.2);
-      i++;
-    }, 480);
+    const o1=actx.createOscillator(), o2=actx.createOscillator();
+    o1.type='sawtooth'; o2.type='square';
+    o1.frequency.value=110; o2.frequency.value=110.5; // slight detune for tension
+    const g=actx.createGain(); g.gain.value=0.035;
+    const lfo=actx.createOscillator(); lfo.frequency.value=2.2; // faster pulse - more aggressive than home
+    const lfoGain=actx.createGain(); lfoGain.gain.value=0.018;
+    lfo.connect(lfoGain); lfoGain.connect(g.gain);
+    o1.connect(g); o2.connect(g); g.connect(musicGain);
+    o1.start(); o2.start(); lfo.start();
+    activeMusicNodes=[o1,o2,lfo];
   }
 
   roomEchoes={}; roomEchoAlive={}; roomEchoStunTimer={}; roomEchoTimeOffset={}; roomEchoFireTimer={};
