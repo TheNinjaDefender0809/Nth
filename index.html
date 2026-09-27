@@ -11,8 +11,15 @@
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;overflow:hidden;}
-  #app{position:fixed;top:0;left:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
-  #hud{display:flex;justify-content:space-between;align-items:center;padding:10px 16px;font-size:13px;}
+  #app{position:fixed;top:0;left:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);}
+  #stage{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;perspective:1300px;overflow:hidden;}
+  #hud{position:absolute;top:0;left:0;right:0;z-index:3;display:flex;justify-content:space-between;align-items:center;
+       padding:10px 16px;font-size:13px;background:linear-gradient(rgba(0,0,0,0.55),transparent);pointer-events:none;}
+  #status{position:absolute;top:44px;left:0;right:0;z-index:3;font-size:12px;opacity:0.8;padding:0 16px;pointer-events:none;}
+  #controls{position:absolute;bottom:0;left:0;right:0;z-index:3;display:flex;justify-content:space-between;align-items:flex-end;
+             padding:14px 18px 18px;gap:12px;background:linear-gradient(transparent,rgba(0,0,0,0.55));}
+  #controls > *{pointer-events:auto;}
+  #joyzone{pointer-events:auto;}
   #hud .title{font-weight:800;color:var(--thief);letter-spacing:1px;}
   #hudRight{display:flex;gap:14px;align-items:center;}
   #lives{display:flex;gap:4px;}
@@ -21,13 +28,11 @@
   #keyIcon.held{opacity:1;transform:scale(1.15);}
   #timer{font-variant-numeric:tabular-nums;font-size:20px;font-weight:800;}
   #timer.low{color:var(--cop);}
-  #status{font-size:12px;opacity:0.8;min-height:16px;padding:0 16px 4px;}
-  #stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center;min-height:0;}
-  canvas{display:block;background:var(--bg);width:100%;height:100%;object-fit:contain;touch-action:none;border-radius:8px;}
-  #toast{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(192,132,252,0.18);
+  canvas{display:block;background:var(--bg);width:100%;height:100%;touch-action:none;border-radius:0;
+         transform:rotateX(var(--tilt,0deg));transform-origin:50% 100%;}
+  #toast{position:absolute;top:56px;left:50%;transform:translateX(-50%);background:rgba(192,132,252,0.18);
          border:1px solid rgba(192,132,252,0.5);color:#e9d5ff;padding:5px 14px;border-radius:20px;
-         font-size:12px;font-weight:700;letter-spacing:0.5px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;}
-  #controls{display:flex;justify-content:space-between;align-items:flex-end;padding:14px 18px 18px;gap:12px;}
+         font-size:12px;font-weight:700;letter-spacing:0.5px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;z-index:3;}
   #joyzone{width:110px;height:110px;border-radius:50%;background:rgba(255,255,255,0.06);position:relative;touch-action:none;}
   #joystick{width:46px;height:46px;border-radius:50%;background:var(--thief);position:absolute;left:32px;top:32px;box-shadow:0 0 12px var(--thief);}
   .btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:var(--text);
@@ -159,7 +164,8 @@
   const CELL=28, COLS=22, ROWS=16;
   const canvas = document.getElementById('c');
   // canvas.width/height are now set dynamically by fitCanvas() below, based on screen aspect
-  let viewCellsW=11, viewCellsH=8; // how many cells are visible at once - the "zoom" level
+  let viewCellsW=11, viewCellsH=8;
+  const TILT_DEG = 26;
   function fitCanvas(){
     const appEl = document.getElementById('app');
     appEl.style.width = window.innerWidth+'px';
@@ -167,14 +173,20 @@
     const stage = document.getElementById('stage');
     const availW = stage.clientWidth, availH = stage.clientHeight;
     const stageAspect = availW/availH;
-    // derive the viewport's cell-height from the SCREEN's own aspect ratio, so the internal
-    // render resolution's aspect always exactly matches the display box - stretching it to fill
-    // 100%/100% then produces zero distortion AND zero dead space, by construction
-    viewCellsH = viewCellsW/stageAspect;
+    // height is locked to the FULL room height (no vertical scrolling - only lateral camera
+    // movement), width derived from the screen's own aspect so it always fills edge to edge;
+    // the extra *1.15 is a deliberate small zoom-out margin
+    viewCellsH = ROWS;
+    viewCellsW = Math.min(COLS, viewCellsH*stageAspect*1.15);
     canvas.width = Math.round(viewCellsW*CELL);
     canvas.height = Math.round(viewCellsH*CELL);
+    // the canvas is tilted back (rotateX) for a pseudo-isometric look, which foreshortens its
+    // apparent height - oversize the CSS height by 1/cos(tilt) so the tilted result still
+    // covers the full screen instead of leaving a gap at the top
+    const comp = 1/Math.cos(TILT_DEG*Math.PI/180);
+    canvas.style.setProperty('--tilt', TILT_DEG+'deg');
     canvas.style.width = availW+'px';
-    canvas.style.height = availH+'px';
+    canvas.style.height = Math.round(availH*comp)+'px';
   }
   window.addEventListener('resize', fitCanvas);
   const ctx = canvas.getContext('2d');
@@ -205,6 +217,7 @@
     // the top or bottom edge before reversing, so every curve actually spans the room's full
     // height instead of small wiggles confined near the middle (which wasted the top/bottom rows)
     let verticalDir = rng()<0.5 ? 1 : -1;
+    const lanePairs = []; // {a,b}: each step's primary cell + its guaranteed-wide partner, if any
     while((cx!==doorOut.x || cy!==doorOut.y) && guard<4000){
       guard++;
       let dx=0,dy=0;
@@ -217,13 +230,15 @@
       let ny = Math.max(1, Math.min(ROWS-2, cy+dy));
       cx=nx; cy=ny;
       grid[cy][cx]=0; mainPath.add(cy+','+cx);
+      let partner=null;
       if(dx!==0){
         const wy = rng()<0.5 ? cy-1 : cy+1;
-        if(wy>0 && wy<ROWS-1){ grid[wy][cx]=0; mainPath.add(wy+','+cx); }
+        if(wy>0 && wy<ROWS-1){ grid[wy][cx]=0; mainPath.add(wy+','+cx); partner={x:cx,y:wy}; }
       } else if(dy!==0){
         const wx = rng()<0.5 ? cx-1 : cx+1;
-        if(wx>0 && wx<COLS-1){ grid[cy][wx]=0; mainPath.add(cy+','+wx); }
+        if(wx>0 && wx<COLS-1){ grid[cy][wx]=0; mainPath.add(cy+','+wx); partner={x:wx,y:cy}; }
       }
+      lanePairs.push({a:{x:cx,y:cy}, b:partner});
     }
     grid[doorOut.y][doorOut.x]=0; mainPath.add(doorOut.y+','+doorOut.x);
     const mainPathArr = Array.from(mainPath).map(s=>{const [y,x]=s.split(',').map(Number); return {x,y};});
@@ -242,15 +257,25 @@
         if(!mainPath.has(by+','+bx)) branchSet.add(by+','+bx);
       }
     }
-    const branchCells = Array.from(branchSet).map(s=>{const [y,x]=s.split(',').map(Number); return {x,y};});
-    for(let i=branchCells.length-1;i>0;i--){ const j=Math.floor(rng()*(i+1)); [branchCells[i],branchCells[j]]=[branchCells[j],branchCells[i]]; }
+    // traps now sit ON the main path itself (on one of the two parallel lane cells at that
+    // point), spread evenly along the route - so avoiding one forces a real lane-swap/zig-zag
+    // instead of sitting uselessly in a side branch nobody walks through
     const trapTypes=['spike','fire','ice'];
-    const trapCells = branchCells.slice(0,4).map(c=>({x:c.x, y:c.y, type:trapTypes[Math.floor(rng()*3)]}));
+    const validPairs = lanePairs.filter(p=>p.b);
+    const trapCells=[];
+    const stride = Math.max(2, Math.floor(validPairs.length/8));
+    for(let i=Math.floor(stride/2); i<validPairs.length && trapCells.length<8; i+=stride){
+      const p = validPairs[i];
+      const cell = rng()<0.5 ? p.a : p.b;
+      if((cell.x===doorIn.x&&cell.y===doorIn.y)||(cell.x===doorOut.x&&cell.y===doorOut.y)) continue;
+      trapCells.push({x:cell.x, y:cell.y, type:trapTypes[Math.floor(rng()*3)]});
+    }
     const floors=[];
     for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++) if(grid[y][x]===0) floors.push({x,y});
     function pickFloor(){ return floors[Math.floor(rng()*floors.length)] || doorOut; }
     let keyCell = pickFloor(), g2=0;
-    while(((keyCell.x===doorIn.x&&keyCell.y===doorIn.y)||(keyCell.x===doorOut.x&&keyCell.y===doorOut.y)) && g2<20){ keyCell=pickFloor(); g2++; }
+    const onTrap=(c)=>trapCells.some(t=>t.x===c.x&&t.y===c.y);
+    while(((keyCell.x===doorIn.x&&keyCell.y===doorIn.y)||(keyCell.x===doorOut.x&&keyCell.y===doorOut.y)||onTrap(keyCell)) && g2<20){ keyCell=pickFloor(); g2++; }
     let copSpawn = pickFloor(), g3=0;
     while(Math.hypot(copSpawn.x-doorIn.x, copSpawn.y-doorIn.y) < 4 && g3<20){ copSpawn=pickFloor(); g3++; }
     return {
@@ -269,10 +294,10 @@
   function updateCamera(){
     const vw=viewCellsW*CELL, vh=viewCellsH*CELL;
     const worldW=COLS*CELL, worldH=ROWS*CELL;
-    let tx = player.x - vw/2, ty = player.y - vh/2;
-    const maxX = worldW-vw, maxY = worldH-vh;
+    let tx = player.x - vw/2;
+    const maxX = worldW-vw;
     camera.x = maxX<=0 ? maxX/2 : Math.max(0, Math.min(maxX, tx));
-    camera.y = maxY<=0 ? maxY/2 : Math.max(0, Math.min(maxY, ty));
+    camera.y = (worldH-vh)/2; // locked - height always fits, camera only ever moves sideways
   }
   let hasKeyThisAttempt=false, keyPickupTimeThisAttempt=null;
 
@@ -299,6 +324,12 @@
     hasKeyThisAttempt=false; keyPickupTimeThisAttempt=null;
     if(roomFirstAttempt[idx]===undefined) roomFirstAttempt[idx]=true;
     if(!roomKeyState[idx]) roomKeyState[idx] = {designatedCarrierEi:null, groundPos:{x:(room.keyCell.x+0.5)*CELL, y:(room.keyCell.y+0.5)*CELL}};
+    // a stun/fire/ice status only ever makes sense within the attempt it was triggered in - if it
+    // carries over into the next retry unreset, that echo starts the new attempt already "used
+    // up" and can end up perpetually paused across every future attempt. Clear it fresh here.
+    if(roomEchoStunTimer[idx]) roomEchoStunTimer[idx] = roomEchoStunTimer[idx].map(()=>0);
+    if(roomEchoTimeOffset[idx]) roomEchoTimeOffset[idx] = roomEchoTimeOffset[idx].map(()=>0);
+    if(roomEchoFireTimer[idx]) roomEchoFireTimer[idx] = roomEchoFireTimer[idx].map(()=>0);
     if(!roomIceMelted[idx]) roomIceMelted[idx] = room.trapCells.map(()=>false);
     document.getElementById('overlay').style.display='none';
     document.getElementById('overlay').classList.remove('collapse');
@@ -423,6 +454,16 @@
   function updateCop(dt, echoPositions){
     if(cop.slowTimer>0) cop.slowTimer=Math.max(0,cop.slowTimer-dt);
     if(cop.graceTimer>0) cop.graceTimer=Math.max(0,cop.graceTimer-dt);
+    // stuck watchdog: whatever the cause, if the cop hasn't actually moved in ~1.2s, force it
+    // back to patrol toward a different waypoint - a blunt but total safety net
+    if(!cop._wp) cop._wp={x:cop.x,y:cop.y};
+    cop._wt=(cop._wt||0)+dt;
+    if(cop._wt>1.2){
+      if(Math.hypot(cop.x-cop._wp.x, cop.y-cop._wp.y)<6){
+        cop.state='patrol'; cop.lastSeen=null; cop.wp=(cop.wp+1)%room.patrol.length;
+      }
+      cop._wp={x:cop.x,y:cop.y}; cop._wt=0;
+    }
     const lenient = roomFirstAttempt[roomIndex];
     const VISION = lenient ? 130 : 190;
     const CHASE_SPEED = lenient ? 52 : 74;
@@ -856,7 +897,7 @@
 
   function makeTutorialRoom(stage){
     // per-stage playable patch size (height x width), centered in the full grid
-    const dims = {1:{h:3,w:8}, 2:{h:6,w:10}, 3:{h:9,w:12}}[stage];
+    const dims = {1:{h:3,w:8}, 2:{h:5,w:10}, 3:{h:9,w:12}}[stage];
     const h=dims.h, w=dims.w;
     const midY = Math.floor(ROWS/2), midX = Math.floor(COLS/2);
     const top = midY - Math.floor(h/2), left = midX - Math.floor(w/2);
