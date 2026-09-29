@@ -28,8 +28,7 @@
   #keyIcon.held{opacity:1;transform:scale(1.15);}
   #timer{font-variant-numeric:tabular-nums;font-size:20px;font-weight:800;}
   #timer.low{color:var(--cop);}
-  canvas{display:block;background:var(--bg);width:100%;height:100%;touch-action:none;border-radius:0;
-         transform:rotateX(var(--tilt,0deg));transform-origin:50% 100%;}
+  canvas{display:block;background:var(--bg);width:100%;height:100%;touch-action:none;border-radius:0;}
   #toast{position:absolute;top:56px;left:50%;transform:translateX(-50%);background:rgba(192,132,252,0.18);
          border:1px solid rgba(192,132,252,0.5);color:#e9d5ff;padding:5px 14px;border-radius:20px;
          font-size:12px;font-weight:700;letter-spacing:0.5px;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;z-index:3;}
@@ -165,7 +164,7 @@
   const canvas = document.getElementById('c');
   // canvas.width/height are now set dynamically by fitCanvas() below, based on screen aspect
   let viewCellsW=11, viewCellsH=8;
-  const TILT_DEG = 26;
+  const TILT_DEG = 0; // disabled: fighting full-screen fill for a shallow effect wasn't worth it - real depth comes properly in v4's isometric rebuild
   function fitCanvas(){
     const appEl = document.getElementById('app');
     appEl.style.width = window.innerWidth+'px';
@@ -173,20 +172,11 @@
     const stage = document.getElementById('stage');
     const availW = stage.clientWidth, availH = stage.clientHeight;
     const stageAspect = availW/availH;
-    // height is locked to the FULL room height (no vertical scrolling - only lateral camera
-    // movement), width derived from the screen's own aspect so it always fills edge to edge;
-    // the extra *1.15 is a deliberate small zoom-out margin
-    viewCellsH = ROWS;
-    viewCellsW = Math.min(COLS, viewCellsH*stageAspect*1.15);
-    canvas.width = Math.round(viewCellsW*CELL);
-    canvas.height = Math.round(viewCellsH*CELL);
-    // the canvas is tilted back (rotateX) for a pseudo-isometric look, which foreshortens its
-    // apparent height - oversize the CSS height by 1/cos(tilt) so the tilted result still
-    // covers the full screen instead of leaving a gap at the top
-    const comp = 1/Math.cos(TILT_DEG*Math.PI/180);
-    canvas.style.setProperty('--tilt', TILT_DEG+'deg');
+    const baseH = 520; // internal render resolution height - zoom is controlled by ISO_TILE_* now
+    canvas.width = Math.round(baseH*stageAspect);
+    canvas.height = baseH;
     canvas.style.width = availW+'px';
-    canvas.style.height = Math.round(availH*comp)+'px';
+    canvas.style.height = availH+'px';
   }
   window.addEventListener('resize', fitCanvas);
   const ctx = canvas.getContext('2d');
@@ -270,6 +260,26 @@
       if((cell.x===doorIn.x&&cell.y===doorIn.y)||(cell.x===doorOut.x&&cell.y===doorOut.y)) continue;
       trapCells.push({x:cell.x, y:cell.y, type:trapTypes[Math.floor(rng()*3)]});
     }
+    // solvability safety net: verify a real route still exists treating every trap as blocked;
+    // if a trap ever leaves no way through, drop traps one at a time until it's clear again
+    function reachableIgnoringTraps(blockSet){
+      const seen=new Set([doorIn.y+','+doorIn.x]);
+      const q=[doorIn]; let qi=0;
+      while(qi<q.length){
+        const c=q[qi++];
+        if(c.x===doorOut.x&&c.y===doorOut.y) return true;
+        for(const n of [{x:c.x+1,y:c.y},{x:c.x-1,y:c.y},{x:c.x,y:c.y+1},{x:c.x,y:c.y-1}]){
+          if(n.x<0||n.y<0||n.x>=COLS||n.y>=ROWS) continue;
+          const k=n.y+','+n.x;
+          if(seen.has(k) || grid[n.y][n.x]===1 || blockSet.has(k)) continue;
+          seen.add(k); q.push(n);
+        }
+      }
+      return false;
+    }
+    while(trapCells.length>0 && !reachableIgnoringTraps(new Set(trapCells.map(t=>t.y+','+t.x)))){
+      trapCells.pop();
+    }
     const floors=[];
     for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++) if(grid[y][x]===0) floors.push({x,y});
     function pickFloor(){ return floors[Math.floor(rng()*floors.length)] || doorOut; }
@@ -290,14 +300,17 @@
   let room, player, cop, recording, roomTimeLeft, elapsed, gameOver, playerStunTimer, playerFireTimer;
   let roomEchoes, roomEchoAlive, roomEchoStunTimer, roomEchoTimeOffset, roomEchoFireTimer, roomArrestMarkers;
   let particles=[], playerPhase=0, playerTrail=[], stepAccum=0;
+  // ---- true isometric projection (diamond grid) - world logic below stays in plain (x,y) cell
+  // pixels untouched; only this maps a world position to where it's drawn on screen ----
+  const ISO_W = CELL*2.2, ISO_H = CELL*1.1, WALL_H = ISO_H*1.15;
+  function isoProject(px, py){
+    const cx = px/CELL, cy = py/CELL;
+    return { x: (cx-cy)*(ISO_W/2), y: (cx+cy)*(ISO_H/2) };
+  }
   let camera = {x:0, y:0};
   function updateCamera(){
-    const vw=viewCellsW*CELL, vh=viewCellsH*CELL;
-    const worldW=COLS*CELL, worldH=ROWS*CELL;
-    let tx = player.x - vw/2;
-    const maxX = worldW-vw;
-    camera.x = maxX<=0 ? maxX/2 : Math.max(0, Math.min(maxX, tx));
-    camera.y = (worldH-vh)/2; // locked - height always fits, camera only ever moves sideways
+    const p = isoProject(player.x, player.y);
+    camera.x = p.x; camera.y = p.y;
   }
   let hasKeyThisAttempt=false, keyPickupTimeThisAttempt=null;
 
@@ -570,11 +583,13 @@
     const wasMetaFirst = metaFirstAttempt;
     metaFirstAttempt=false;
     roomFirstAttempt[roomIndex]=false;
-    const newIdx = finalizeRoomEcho(hasKeyThisAttempt);
-    if(!wasMetaFirst){
+    const newIdx = finalizeRoomEcho(hasKeyThisAttempt); // ALWAYS becomes an echo, whatever the reason
+    // collapse ONLY ever comes from being ARRESTED by the cop with zero other Echoes alive -
+    // a trap, fire, timeout, or voluntary reset never collapses the timeline, even at zero Echoes,
+    // it just becomes a fresh one and play continues
+    if(reason==='caught' && !wasMetaFirst){
       const otherLiving = livingEchoTotal - (newIdx>=0?1:0);
       if(otherLiving<=0){
-        if(newIdx>=0){ roomEchoAlive[roomIndex][newIdx]=false; livingEchoTotal--; }
         showCollapse(); sfxCollapse();
         return;
       }
@@ -819,71 +834,116 @@
     return `rgb(${r},${g},${b})`;
   }
 
+  function isoDiamond(cx, cy, w, h){ // cx,cy = cell-space center point (can be fractional)
+    const p = isoProject(cx*CELL, cy*CELL);
+    return { x:p.x, y:p.y,
+      top:{x:p.x, y:p.y-h/2}, right:{x:p.x+w/2, y:p.y}, bottom:{x:p.x, y:p.y+h/2}, left:{x:p.x-w/2, y:p.y} };
+  }
+  function fillDiamond(d, color){
+    ctx.fillStyle=color;
+    ctx.beginPath(); ctx.moveTo(d.top.x,d.top.y); ctx.lineTo(d.right.x,d.right.y);
+    ctx.lineTo(d.bottom.x,d.bottom.y); ctx.lineTo(d.left.x,d.left.y); ctx.closePath(); ctx.fill();
+  }
+  function drawIsoTile(x,y,isWallCell){
+    const d = isoDiamond(x+0.5, y+0.5, ISO_W, ISO_H);
+    if(!isWallCell){
+      fillDiamond(d, ((x+y)%2===0)?'#171a2b':'#141728');
+      return;
+    }
+    // extruded 3D block: top diamond raised by WALL_H, plus the two front-facing side walls
+    const top = { top:{x:d.top.x,y:d.top.y-WALL_H}, right:{x:d.right.x,y:d.right.y-WALL_H},
+                  bottom:{x:d.bottom.x,y:d.bottom.y-WALL_H}, left:{x:d.left.x,y:d.left.y-WALL_H} };
+    ctx.fillStyle='#171a26'; // right face (base-right -> base-bottom -> top-bottom -> top-right)
+    ctx.beginPath(); ctx.moveTo(d.right.x,d.right.y); ctx.lineTo(d.bottom.x,d.bottom.y);
+    ctx.lineTo(top.bottom.x,top.bottom.y); ctx.lineTo(top.right.x,top.right.y); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#0f1119'; // left face (base-left -> base-bottom -> top-bottom -> top-left)
+    ctx.beginPath(); ctx.moveTo(d.left.x,d.left.y); ctx.lineTo(d.bottom.x,d.bottom.y);
+    ctx.lineTo(top.bottom.x,top.bottom.y); ctx.lineTo(top.left.x,top.left.y); ctx.closePath(); ctx.fill();
+    fillDiamond(top, '#3a4166'); // top face, brightest - reads as the lit surface
+  }
+
   function render(renderEchoPositions, keyPos){
     ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.save();
-    ctx.translate(-camera.x, -camera.y);
+    ctx.translate(canvas.width/2-camera.x, canvas.height/2.6-camera.y);
+
+    const items = [];
     for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
-      const isDoor = (x===room.doorOut.x&&y===room.doorOut.y) || (x===room.doorIn.x&&y===room.doorIn.y);
-      if(room.grid[y][x]===1){
-        ctx.fillStyle='#1c2038'; ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
-        ctx.fillStyle='#3a4166'; ctx.fillRect(x*CELL+2,y*CELL+2,CELL-6,CELL-6);
-      } else {
-        ctx.fillStyle=((x+y)%2===0)?'#171a2b':'#141728';
-        ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
-      }
-      if(isDoor){
-        const locked=(x===room.doorOut.x&&y===room.doorOut.y) && !hasKeyThisAttempt;
-        const pulse=0.5+0.5*Math.sin(performance.now()/250);
-        ctx.fillStyle = locked ? `rgba(120,90,150,0.35)` : `rgba(192,132,252,${0.3+0.3*pulse})`;
-        ctx.fillRect(x*CELL+3,y*CELL+3,CELL-6,CELL-6);
-      }
+      items.push({ k:x+y-0.4, fn:()=>drawIsoTile(x,y, room.grid[y][x]===1) });
     }
+    const isDoorIn=(x,y)=>x===room.doorIn.x&&y===room.doorIn.y, isDoorOut=(x,y)=>x===room.doorOut.x&&y===room.doorOut.y;
+    [room.doorIn, room.doorOut].forEach(dc=>{
+      items.push({ k:dc.x+dc.y-0.2, fn:()=>{
+        const locked = isDoorOut(dc.x,dc.y) && !hasKeyThisAttempt;
+        const pulse=0.5+0.5*Math.sin(performance.now()/250);
+        const d=isoDiamond(dc.x+0.5,dc.y+0.5, ISO_W*0.7, ISO_H*0.7);
+        fillDiamond(d, locked?'rgba(120,90,150,0.4)':`rgba(192,132,252,${0.35+0.3*pulse})`);
+      }});
+    });
     const iceState = roomIceMelted[roomIndex];
     room.trapCells.forEach((t,ti)=>{
-      if(t.type==='ice' && iceState[ti]) return; // melted, gone
-      const tx=(t.x+0.5)*CELL, ty=(t.y+0.5)*CELL;
-      ctx.font='13px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      if(t.type==='spike'){
-        ctx.strokeStyle='rgba(255,77,109,0.8)'; ctx.lineWidth=2;
-        ctx.beginPath(); ctx.moveTo(tx-6,ty-6); ctx.lineTo(tx+6,ty+6); ctx.moveTo(tx+6,ty-6); ctx.lineTo(tx-6,ty+6); ctx.stroke();
-      } else if(t.type==='fire'){ ctx.fillText('🔥', tx, ty); }
-      else if(t.type==='ice'){ ctx.fillText('❄️', tx, ty); }
+      if(t.type==='ice' && iceState[ti]) return;
+      items.push({ k:t.x+t.y-0.1, fn:()=>{
+        const p=isoProject((t.x+0.5)*CELL,(t.y+0.5)*CELL);
+        ctx.font='14px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        if(t.type==='spike'){
+          ctx.strokeStyle='rgba(255,77,109,0.85)'; ctx.lineWidth=2;
+          ctx.beginPath(); ctx.moveTo(p.x-6,p.y-6); ctx.lineTo(p.x+6,p.y+6); ctx.moveTo(p.x+6,p.y-6); ctx.lineTo(p.x-6,p.y+6); ctx.stroke();
+        } else if(t.type==='fire'){ ctx.fillText('🔥', p.x, p.y); }
+        else { ctx.fillText('❄️', p.x, p.y); }
+      }});
     });
-    for(const m of (roomArrestMarkers[roomIndex]||[])) drawCharacter(m.x,m.y,PLAYER_R,'#4fd1c5',0,false,0.12);
-
-    if(!hasKeyThisAttempt){
-      const bob=Math.sin(performance.now()/220)*3;
-      ctx.font='15px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText('🔑', keyPos.x, keyPos.y-13+bob);
+    for(const m of (roomArrestMarkers[roomIndex]||[])){
+      items.push({ k:m.x/CELL+m.y/CELL+0.3, fn:()=>{ const p=isoProject(m.x,m.y); drawCharacter(p.x,p.y,PLAYER_R,'#4fd1c5',0,false,0.12); } });
     }
-    for(const e of renderEchoPositions){
-      const col = e.fire ? '#ff8c42' : e.stunned ? '#93c5fd' : '#4fd1c5';
-      drawCharacter(e.x,e.y,PLAYER_R,col,0,false,0.55);
-      if(e.stunned){ ctx.font='10px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#93c5fd'; ctx.fillText('❄️', e.x, e.y-15); }
-      if(e.fire){ ctx.font='10px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ff8c42'; ctx.fillText('🔥', e.x, e.y-15); }
+    if(!hasKeyThisAttempt){
+      items.push({ k:keyPos.x/CELL+keyPos.y/CELL+0.35, fn:()=>{
+        const p=isoProject(keyPos.x,keyPos.y); const bob=Math.sin(performance.now()/220)*3;
+        ctx.font='15px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('🔑', p.x, p.y-14+bob);
+      }});
     }
     for(const p of playerTrail){
-      ctx.fillStyle=`rgba(79,209,197,${0.25*p.a})`;
-      ctx.beginPath(); ctx.arc(p.x,p.y,PLAYER_R*0.7,0,7); ctx.fill();
+      items.push({ k:p.x/CELL+p.y/CELL+0.35, fn:()=>{
+        const ip=isoProject(p.x,p.y);
+        ctx.fillStyle=`rgba(79,209,197,${0.25*p.a})`;
+        ctx.beginPath(); ctx.arc(ip.x,ip.y,PLAYER_R*0.6,0,7); ctx.fill();
+      }});
+    }
+    for(const e of renderEchoPositions){
+      items.push({ k:e.x/CELL+e.y/CELL+0.5, fn:()=>{
+        const p=isoProject(e.x,e.y);
+        const col = e.fire?'#ff8c42':e.stunned?'#93c5fd':'#4fd1c5';
+        drawCharacter(p.x,p.y,PLAYER_R,col,0,false,0.6);
+        if(e.stunned||e.fire){ ctx.font='10px system-ui'; ctx.textAlign='center'; ctx.fillStyle=e.fire?'#ff8c42':'#93c5fd'; ctx.fillText(e.fire?'🔥':'❄️', p.x, p.y-16); }
+      }});
     }
     const lenient = roomFirstAttempt[roomIndex];
-    const copColor = cop.slowTimer>0 ? '#93c5fd' : lenient ? '#6b7280' : (cop.state==='predict' ? '#f6c453' : '#ff4d6d');
-    ctx.fillStyle = lenient ? 'rgba(107,114,128,0.06)' : (cop.state==='predict' ? 'rgba(246,196,83,0.14)' : 'rgba(255,77,109,0.07)');
-    ctx.beginPath(); ctx.moveTo(cop.x,cop.y); ctx.arc(cop.x,cop.y,190,0,7); ctx.fill();
-    drawCharacter(cop.x,cop.y,COP_R,copColor,performance.now()/120,true,1);
-    const playerCol = playerFireTimer>0 ? '#ff8c42' : playerStunTimer>0 ? '#93c5fd' : '#4fd1c5';
-    if(playerStunTimer>0){ ctx.font='11px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#93c5fd'; ctx.fillText('❄️', player.x, player.y-16); }
-    if(playerFireTimer>0){ ctx.font='11px system-ui'; ctx.textAlign='center'; ctx.fillStyle='#ff8c42'; ctx.fillText('🔥', player.x, player.y-16); }
-    drawCharacter(player.x,player.y,PLAYER_R, playerCol, playerPhase, playerStunTimer<=0, 1);
-    for(const p of particles){
-      ctx.globalAlpha=Math.max(0,1-p.age/p.life);
-      ctx.fillStyle=p.color; ctx.fillRect(p.x-2,p.y-2,4,4);
-      ctx.globalAlpha=1;
+    items.push({ k:cop.x/CELL+cop.y/CELL+0.5, fn:()=>{
+      const p=isoProject(cop.x,cop.y);
+      const col = cop.slowTimer>0?'#93c5fd':lenient?'#6b7280':(cop.state==='predict'?'#f6c453':'#ff4d6d');
+      drawCharacter(p.x,p.y,COP_R,col,performance.now()/120,true,1);
+    }});
+    items.push({ k:player.x/CELL+player.y/CELL+0.6, fn:()=>{
+      const p=isoProject(player.x,player.y);
+      const col = playerFireTimer>0?'#ff8c42':playerStunTimer>0?'#93c5fd':'#4fd1c5';
+      if(playerStunTimer>0||playerFireTimer>0){ ctx.font='11px system-ui'; ctx.textAlign='center'; ctx.fillStyle=playerFireTimer>0?'#ff8c42':'#93c5fd'; ctx.fillText(playerFireTimer>0?'🔥':'❄️', p.x, p.y-17); }
+      drawCharacter(p.x,p.y,PLAYER_R,col,playerPhase,playerStunTimer<=0,1);
+    }});
+    for(const pt of particles){
+      items.push({ k:pt.x/CELL+pt.y/CELL+0.7, fn:()=>{
+        const p=isoProject(pt.x,pt.y);
+        ctx.globalAlpha=Math.max(0,1-pt.age/pt.life);
+        ctx.fillStyle=pt.color; ctx.fillRect(p.x-2,p.y-2,4,4);
+        ctx.globalAlpha=1;
+      }});
     }
-    ctx.restore(); // back to screen space - vignette must stay fixed to the viewport, not the world
+    items.sort((a,b)=>a.k-b.k);
+    for(const it of items) it.fn();
+
+    ctx.restore();
     const vg=ctx.createRadialGradient(canvas.width/2,canvas.height/2,canvas.height*0.25,canvas.width/2,canvas.height/2,canvas.height*0.75);
-    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.35)');
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.4)');
     ctx.fillStyle=vg; ctx.fillRect(0,0,canvas.width,canvas.height);
   }
 
@@ -903,18 +963,27 @@
     const top = midY - Math.floor(h/2), left = midX - Math.floor(w/2);
     const bottom = top+h-1, right = left+w-1;
     const midRowY = top + Math.floor(h/2);
-    const doorIn={x:left, y:midRowY}, doorOut={x:right, y:midRowY};
     const grid=[];
     for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
-    for(let y=top;y<=bottom;y++) for(let x=left;x<=right;x++) grid[y][x]=0;
+    let doorIn={x:left, y:midRowY}, doorOut={x:right, y:midRowY};
     let trapCells=[], keyCell=doorOut, copSpawn={x:right-1,y:top};
+
     if(stage===2){
-      keyCell = {x:left+3, y:top};
+      // a real hand-built 2-wide lane structure (not an open field) so traps genuinely force a
+      // lane swap: upper band -> a 2-wide vertical bridge -> lower band
+      doorIn={x:left, y:top}; doorOut={x:right, y:bottom};
+      for(let y=top; y<=top+1; y++) for(let x=left; x<=left+5; x++) grid[y][x]=0; // band A
+      for(let y=top; y<=bottom; y++) for(let x=left+5; x<=left+6; x++) grid[y][x]=0; // bridge
+      for(let y=bottom-1; y<=bottom; y++) for(let x=left+5; x<=right; x++) grid[y][x]=0; // band B
+      keyCell = {x:left+3, y:top+1};
       trapCells = [
-        {x:left+2, y:bottom, type:'spike'},
-        {x:left+5, y:top+1, type:'fire'},
-        {x:right-2, y:bottom, type:'ice'}
+        {x:left+2, y:top, type:'spike'},
+        {x:left+4, y:top+1, type:'fire'},
+        {x:left+7, y:bottom-1, type:'ice'},
+        {x:left+8, y:bottom, type:'spike'}
       ];
+    } else {
+      for(let y=top;y<=bottom;y++) for(let x=left;x<=right;x++) grid[y][x]=0;
     }
     if(stage===3){
       keyCell = {x:left+4, y:bottom};
