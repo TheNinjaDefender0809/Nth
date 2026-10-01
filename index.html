@@ -89,7 +89,7 @@
   <button id="settingsBtn" class="settingsBtn">⚙</button>
   <h1 class="homeTitle">N<span class="thSup">TH</span></h1>
   <div class="homeSub">The Doom Loop</div>
-  <p class="homeTag">You stole a time machine which broke in the process. Escape this high security facility using your replicas (ECHOES).</p>
+  <p class="homeTag">You stole a time machine which broke in the process. Escape the facility using your replicas (ECHOES).</p>
   <div class="glimpseWrap">
     <div class="glimpse g1">🔑 Find the key before the cop finds you</div>
     <div class="glimpse g2">👻 Every failed run becomes an Echo</div>
@@ -161,7 +161,7 @@
 
 <script>
 (function(){
-  const CELL=28, COLS=22, ROWS=16;
+  const CELL=30, COLS=11, ROWS=30;
   const canvas = document.getElementById('c');
   // canvas.width/height are now set dynamically by fitCanvas() below, based on screen aspect
   let viewCellsW=11, viewCellsH=8;
@@ -196,73 +196,115 @@
     const rng = mulberry32((seed*99991 + idx*7919 + 12345) >>> 0);
     const grid = [];
     for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
-    // entry/exit no longer pinned to dead-center of the edge - each gets its own random row,
-    // which alone forces more diagonal/curved travel across the room
-    const doorIn = {x:0, y:1+Math.floor(rng()*(ROWS-2))};
-    const doorOut = {x:COLS-1, y:1+Math.floor(rng()*(ROWS-2))};
+
+    // The room is now deliberately LONG in the camera's forward direction.
+    // Player enters from the near/bottom end and must travel toward the far/top end.
+    const centerX = Math.floor(COLS/2);
+    const doorIn  = {x:centerX, y:ROWS-2};
+    const doorOut = {x:centerX, y:1};
+
     let cx=doorIn.x, cy=doorIn.y;
     grid[cy][cx]=0;
     const mainPath = new Set([cy+','+cx]);
+    const lanePairs = [];
     let guard=0;
-    // deliberate serpentine bias: commit to a vertical direction and sweep all the way to near
-    // the top or bottom edge before reversing, so every curve actually spans the room's full
-    // height instead of small wiggles confined near the middle (which wasted the top/bottom rows)
-    let verticalDir = rng()<0.5 ? 1 : -1;
-    const lanePairs = []; // {a,b}: each step's primary cell + its guaranteed-wide partner, if any
-    while((cx!==doorOut.x || cy!==doorOut.y) && guard<4000){
+
+    // Build a winding 2-3 cell wide route mostly along depth (Y).
+    // Occasional lateral shifts create the zig-zag/maze feel without losing the
+    // strong "long room" silhouette.
+    let lateralDir = rng()<0.5 ? -1 : 1;
+    while((cx!==doorOut.x || cy!==doorOut.y) && guard<5000){
       guard++;
-      let dx=0,dy=0;
-      if(cx<doorOut.x && rng()<0.22) dx=1;
-      else {
-        dy=verticalDir;
-        if((verticalDir===1 && cy>=ROWS-3) || (verticalDir===-1 && cy<=2)) verticalDir*=-1;
+      let dx=0, dy=-1;
+
+      // Mostly move forward. Every few cells, shift sideways, then continue forward.
+      if(rng()<0.24 && cy>3 && cy<ROWS-4){
+        lateralDir = rng()<0.5 ? -1 : 1;
+        dx=lateralDir;
+        dy=0;
+      } else if(rng()<0.10 && cy>4 && cy<ROWS-4){
+        dx = -lateralDir;
+        dy=0;
       }
-      let nx = Math.max(0, Math.min(COLS-1, cx+dx));
-      let ny = Math.max(1, Math.min(ROWS-2, cy+dy));
+
+      const nx=Math.max(1,Math.min(COLS-2,cx+dx));
+      const ny=Math.max(1,Math.min(ROWS-2,cy+dy));
       cx=nx; cy=ny;
       grid[cy][cx]=0; mainPath.add(cy+','+cx);
+
+      // Make the route readable as a 2-cell-wide lane at many points.
       let partner=null;
-      if(dx!==0){
-        const wy = rng()<0.5 ? cy-1 : cy+1;
-        if(wy>0 && wy<ROWS-1){ grid[wy][cx]=0; mainPath.add(wy+','+cx); partner={x:cx,y:wy}; }
-      } else if(dy!==0){
+      if(dy!==0){
         const wx = rng()<0.5 ? cx-1 : cx+1;
-        if(wx>0 && wx<COLS-1){ grid[cy][wx]=0; mainPath.add(cy+','+wx); partner={x:wx,y:cy}; }
+        if(wx>0 && wx<COLS-1){
+          grid[cy][wx]=0; mainPath.add(cy+','+wx);
+          partner={x:wx,y:cy};
+        }
+      } else if(dx!==0){
+        const wy = cy+1;
+        if(wy>0 && wy<ROWS-1){
+          grid[wy][cx]=0; mainPath.add(wy+','+cx);
+          partner={x:cx,y:wy};
+        }
       }
-      lanePairs.push({a:{x:cx,y:cy}, b:partner});
+      lanePairs.push({a:{x:cx,y:cy},b:partner});
     }
-    grid[doorOut.y][doorOut.x]=0; mainPath.add(doorOut.y+','+doorOut.x);
-    const mainPathArr = Array.from(mainPath).map(s=>{const [y,x]=s.split(',').map(Number); return {x,y};});
-    const branchSet = new Set();
-    for(let b=0;b<10;b++){
-      const start = mainPathArr[Math.floor(rng()*mainPathArr.length)];
-      let bx=start.x, by=start.y;
-      let steps=5+Math.floor(rng()*6);
-      for(let s=0;s<steps;s++){
+
+    // Guarantee a clean connection to the exit.
+    while(cy>doorOut.y){
+      cy--;
+      grid[cy][cx]=0;
+      mainPath.add(cy+','+cx);
+    }
+    while(cx!==doorOut.x){
+      cx += cx<doorOut.x ? 1 : -1;
+      grid[cy][cx]=0;
+      mainPath.add(cy+','+cx);
+    }
+    grid[doorOut.y][doorOut.x]=0;
+    mainPath.add(doorOut.y+','+doorOut.x);
+
+    // Add side pockets / alternate lanes. These are intentionally shallow
+    // because the main visual read should remain a long forward corridor.
+    const mainPathArr=Array.from(mainPath).map(v=>{
+      const [y,x]=v.split(',').map(Number); return {x,y};
+    });
+    for(let b=0;b<14;b++){
+      const st=mainPathArr[Math.floor(rng()*mainPathArr.length)];
+      let bx=st.x, by=st.y;
+      const steps=2+Math.floor(rng()*5);
+      for(let k=0;k<steps;k++){
         const dir=Math.floor(rng()*4);
         if(dir===0) bx=Math.min(COLS-2,bx+1);
         else if(dir===1) bx=Math.max(1,bx-1);
         else if(dir===2) by=Math.min(ROWS-2,by+1);
         else by=Math.max(1,by-1);
         grid[by][bx]=0;
-        if(!mainPath.has(by+','+bx)) branchSet.add(by+','+bx);
       }
     }
-    // traps now sit ON the main path itself (on one of the two parallel lane cells at that
-    // point), spread evenly along the route - so avoiding one forces a real lane-swap/zig-zag
-    // instead of sitting uselessly in a side branch nobody walks through
+
     const trapTypes=['spike','fire','ice'];
-    const validPairs = lanePairs.filter(p=>p.b);
     const trapCells=[];
-    const stride = Math.max(2, Math.floor(validPairs.length/8));
-    for(let i=Math.floor(stride/2); i<validPairs.length && trapCells.length<8; i+=stride){
-      const p = validPairs[i];
-      const cell = rng()<0.5 ? p.a : p.b;
-      if((cell.x===doorIn.x&&cell.y===doorIn.y)||(cell.x===doorOut.x&&cell.y===doorOut.y)) continue;
-      trapCells.push({x:cell.x, y:cell.y, type:trapTypes[Math.floor(rng()*3)]});
+    const floors=[];
+    for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++)
+      if(grid[y][x]===0) floors.push({x,y});
+
+    // Place traps mostly in the forward route, never at entry/exit.
+    const candidates=floors.filter(c=>
+      c.y<ROWS-4 && c.y>3 &&
+      !(c.x===doorIn.x&&c.y===doorIn.y) &&
+      !(c.x===doorOut.x&&c.y===doorOut.y)
+    );
+    const desired=8;
+    const used=new Set();
+    for(let i=0;i<desired && candidates.length;i++){
+      const c=candidates[Math.floor(rng()*candidates.length)];
+      const key=c.x+','+c.y;
+      if(used.has(key)) continue;
+      used.add(key);
+      trapCells.push({x:c.x,y:c.y,type:trapTypes[Math.floor(rng()*3)]});
     }
-    // solvability safety net: verify a real route still exists treating every trap as blocked;
-    // if a trap ever leaves no way through, drop traps one at a time until it's clear again
+
     function reachableIgnoringTraps(blockSet){
       const seen=new Set([doorIn.y+','+doorIn.x]);
       const q=[doorIn]; let qi=0;
@@ -272,28 +314,43 @@
         for(const n of [{x:c.x+1,y:c.y},{x:c.x-1,y:c.y},{x:c.x,y:c.y+1},{x:c.x,y:c.y-1}]){
           if(n.x<0||n.y<0||n.x>=COLS||n.y>=ROWS) continue;
           const k=n.y+','+n.x;
-          if(seen.has(k) || grid[n.y][n.x]===1 || blockSet.has(k)) continue;
+          if(seen.has(k)||grid[n.y][n.x]===1||blockSet.has(k)) continue;
           seen.add(k); q.push(n);
         }
       }
       return false;
     }
-    while(trapCells.length>0 && !reachableIgnoringTraps(new Set(trapCells.map(t=>t.y+','+t.x)))){
+    while(trapCells.length && !reachableIgnoringTraps(new Set(trapCells.map(t=>t.y+','+t.x))))
       trapCells.pop();
+
+    function pickFloor(){
+      return floors[Math.floor(rng()*floors.length)] || doorOut;
     }
-    const floors=[];
-    for(let y=1;y<ROWS-1;y++) for(let x=1;x<COLS-1;x++) if(grid[y][x]===0) floors.push({x,y});
-    function pickFloor(){ return floors[Math.floor(rng()*floors.length)] || doorOut; }
-    let keyCell = pickFloor(), g2=0;
-    const onTrap=(c)=>trapCells.some(t=>t.x===c.x&&t.y===c.y);
-    while(((keyCell.x===doorIn.x&&keyCell.y===doorIn.y)||(keyCell.x===doorOut.x&&keyCell.y===doorOut.y)||onTrap(keyCell)) && g2<20){ keyCell=pickFloor(); g2++; }
-    let copSpawn = pickFloor(), g3=0;
-    while(Math.hypot(copSpawn.x-doorIn.x, copSpawn.y-doorIn.y) < 4 && g3<20){ copSpawn=pickFloor(); g3++; }
-    return {
-      grid, doorIn, doorOut, keyCell, trapCells,
-      patrol: [pickFloor(), pickFloor(), pickFloor()],
-      copSpawn
-    };
+    let keyCell=pickFloor(), g2=0;
+    const onTrap=c=>trapCells.some(t=>t.x===c.x&&t.y===c.y);
+    while(((keyCell.x===doorIn.x&&keyCell.y===doorIn.y)||
+           (keyCell.x===doorOut.x&&keyCell.y===doorOut.y)||onTrap(keyCell))&&g2<50){
+      keyCell=pickFloor(); g2++;
+    }
+
+    let copSpawn=pickFloor(), g3=0;
+    // Start the cop farther ahead so the player sees it as a hunter in the distance.
+    while((copSpawn.y>ROWS-5 || Math.hypot(copSpawn.x-doorIn.x,copSpawn.y-doorIn.y)<8) && g3<60){
+      copSpawn=pickFloor(); g3++;
+    }
+
+    const patrol=[];
+    for(const targetY of [Math.floor(ROWS*0.78),Math.floor(ROWS*0.55),Math.floor(ROWS*0.30),3]){
+      let best=pickFloor();
+      let bestD=Infinity;
+      for(const f of floors){
+        const d=Math.abs(f.y-targetY)+Math.abs(f.x-centerX)*2;
+        if(d<bestD){bestD=d;best=f;}
+      }
+      patrol.push(best);
+    }
+
+    return {grid,doorIn,doorOut,keyCell,trapCells,patrol,copSpawn};
   }
 
   let metaSeed, roomIndex, roomsCleared, totalEchoesEver, livingEchoTotal, dirHist, metaFirstAttempt, roomFirstAttempt, roomKeyState, roomIceMelted;
@@ -301,22 +358,40 @@
   let room, player, cop, recording, roomTimeLeft, elapsed, gameOver, playerStunTimer, playerFireTimer;
   let roomEchoes, roomEchoAlive, roomEchoStunTimer, roomEchoTimeOffset, roomEchoFireTimer, roomArrestMarkers;
   let particles=[], playerPhase=0, playerTrail=[], stepAccum=0;
-  // ---- true isometric projection (diamond grid) - world logic below stays in plain (x,y) cell
-  // pixels untouched; only this maps a world position to where it's drawn on screen ----
-  const ISO_W = CELL*2.2, ISO_H = CELL*1.1, WALL_H = ISO_H*1.15;
-  function isoProject(px, py){
-    const cx = px/CELL, cy = py/CELL;
-    return { x: (cx-cy)*(ISO_W/2), y: (cx+cy)*(ISO_H/2) };
+  // ---- third-person perspective ----
+  // World logic remains a normal grid. Rendering is now a camera-behind-player
+  // projection: the player stays near the bottom of the screen while the long
+  // room stretches toward a vanishing point in front of them.
+  const VIEW_HORIZON = 0.20;
+  const PLAYER_SCREEN_Y = 0.76;
+  const FOV_DEPTH = 18;
+  const DEPTH_SCALE = 34;
+  const WALL_HEIGHT = 42;
+
+  let camera = {x:0,y:0};
+
+  function thirdProject(px,py){
+    const dx = px - player.x;
+    const depth = player.y - py; // smaller Y is farther ahead
+    const scale = FOV_DEPTH / (FOV_DEPTH + depth);
+    const sx = canvas.width*0.5 + dx*CELL*1.18*scale;
+    const baseY = canvas.height*PLAYER_SCREEN_Y - depth*DEPTH_SCALE;
+    const horizonY = canvas.height*VIEW_HORIZON;
+    const sy = horizonY + (baseY-horizonY)*scale;
+    return {x:sx,y:sy,scale,depth};
   }
-  let camera = {x:0, y:0};
+
+  function projectedPoint(px,py){
+    return thirdProject(px,py);
+  }
+
   function updateCamera(){
-    // camera is fixed on the room's left edge horizontally (like a camera on a rail) and only
-    // ever tracks the player vertically
-    const leftRef = isoProject(1.5*CELL, (ROWS/2)*CELL);
-    const p = isoProject(player.x, player.y);
-    camera.x = leftRef.x;
-    camera.y = p.y;
+    // Camera is locked to the player's position, producing the "runner"
+    // perspective rather than the old overhead/isometric tracking.
+    camera.x=player.x;
+    camera.y=player.y;
   }
+
   let hasKeyThisAttempt=false, keyPickupTimeThisAttempt=null;
 
   function metaReset(){
@@ -824,138 +899,521 @@
     requestAnimationFrame(loop);
   }
 
-  function drawCharacter(x,y,r,color,phase,bounce,alpha){
-    ctx.globalAlpha = alpha===undefined?1:alpha;
-    ctx.fillStyle='rgba(0,0,0,0.35)';
-    ctx.beginPath(); ctx.ellipse(x,y+r*0.7,r*0.9,r*0.35,0,0,7); ctx.fill();
-    const bob = bounce ? -Math.abs(Math.sin(phase))*3 : 0;
-    ctx.strokeStyle=color; ctx.lineWidth=3; ctx.lineCap='round';
-    const swing = bounce ? Math.sin(phase)*5 : 0;
-    ctx.beginPath(); ctx.moveTo(x-3,y+r*0.4+bob); ctx.lineTo(x-3+swing,y+r*1.1+bob); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x+3,y+r*0.4+bob); ctx.lineTo(x+3-swing,y+r*1.1+bob); ctx.stroke();
-    const g=ctx.createRadialGradient(x-r*0.3,y+bob-r*0.3,1,x,y+bob,r*1.3);
-    g.addColorStop(0, shade(color,40)); g.addColorStop(1, color);
-    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y+bob,r,0,7); ctx.fill();
-    ctx.globalAlpha=1;
+
+  // ================= THIRD-PERSON 3D RENDERER V3 =================
+  // True perspective projection: camera is behind + above the player and
+  // pitched downward, giving the room a real 3D "Subway Surfers" style read.
+  const TP_FOV_FOCAL = 700;
+  const TP_CAMERA_HEIGHT = 4.5; // lowered camera; same distance and pitch
+  const TP_CAMERA_BACK = 10.5;   // camera pulled back so the player remains visible and smaller
+  const TP_PITCH = 28 * Math.PI / 180;
+  const TP_SCREEN_CENTER_Y = 500;
+  const TP_VIEW_AHEAD = 34;
+  const TP_VIEW_BEHIND = 2.5;
+  const TP_WALL_HEIGHT = 1.35;  // wall height in cells
+
+  function thirdProject(px, py, worldHeight=0){
+    // World coordinates are expressed in cells:
+    // X = left/right, Z = forward (player.y - worldY), Y = vertical.
+    const relX = (px - player.x) / CELL;
+    const z = (player.y - py) / CELL;
+    const relZ = z + TP_CAMERA_BACK;
+    const relY = worldHeight - TP_CAMERA_HEIGHT;
+
+    const sinP = Math.sin(TP_PITCH), cosP = Math.cos(TP_PITCH);
+
+    // Camera basis: forward points into the room, up is tilted with the camera.
+    const depth = relY * (-sinP) + relZ * cosP;
+    const up = relY * cosP + relZ * sinP;
+
+    if(depth <= 0.05) return {x:-99999,y:-99999,scale:0,depth};
+
+    const scale = TP_FOV_FOCAL / depth;
+    return {
+      x: canvas.width * 0.5 + relX * scale,
+      y: TP_SCREEN_CENTER_Y - up * scale,
+      scale,
+      depth,
+      z
+    };
   }
+
+  function projectedPoint(px,py){ return thirdProject(px,py); }
+
+  function updateCamera(){
+    camera.x=player.x;
+    camera.y=player.y;
+  }
+
   function shade(hex, amt){
-    const c=hex.replace('#',''); const num=parseInt(c.length===6?c:'ff4d6d',16);
+    const c=hex.replace('#','');
+    const num=parseInt(c.length===6?c:'ff4d6d',16);
     let r=(num>>16)+amt, g=(num>>8 & 0xff)+amt, b=(num & 0xff)+amt;
     r=Math.min(255,Math.max(0,r)); g=Math.min(255,Math.max(0,g)); b=Math.min(255,Math.max(0,b));
     return `rgb(${r},${g},${b})`;
   }
 
-  function isoDiamond(cx, cy, w, h){ // cx,cy = cell-space center point (can be fractional)
-    const p = isoProject(cx*CELL, cy*CELL);
-    return { x:p.x, y:p.y,
-      top:{x:p.x, y:p.y-h/2}, right:{x:p.x+w/2, y:p.y}, bottom:{x:p.x, y:p.y+h/2}, left:{x:p.x-w/2, y:p.y} };
+  function poly(points,fill,stroke){
+    if(!points || points.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y))) return;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x,points[0].y);
+    for(let i=1;i<points.length;i++) ctx.lineTo(points[i].x,points[i].y);
+    ctx.closePath();
+    if(fill){ctx.fillStyle=fill;ctx.fill();}
+    if(stroke){ctx.strokeStyle=stroke;ctx.stroke();}
   }
-  function fillDiamond(d, color){
-    ctx.fillStyle=color;
-    ctx.beginPath(); ctx.moveTo(d.top.x,d.top.y); ctx.lineTo(d.right.x,d.right.y);
-    ctx.lineTo(d.bottom.x,d.bottom.y); ctx.lineTo(d.left.x,d.left.y); ctx.closePath(); ctx.fill();
+
+  function groundQuad(x,y){
+    return {
+      a:thirdProject(x*CELL,y*CELL,0),
+      b:thirdProject((x+1)*CELL,y*CELL,0),
+      c:thirdProject((x+1)*CELL,(y+1)*CELL,0),
+      d:thirdProject(x*CELL,(y+1)*CELL,0)
+    };
   }
-  function drawIsoTile(x,y,isWallCell){
-    const d = isoDiamond(x+0.5, y+0.5, ISO_W, ISO_H);
-    if(!isWallCell){
-      fillDiamond(d, ((x+y)%2===0)?'#171a2b':'#141728');
+
+  function drawFloorTile(x,y){
+    const q=groundQuad(x,y);
+    if(q.a.depth<=0||q.b.depth<=0||q.c.depth<=0||q.d.depth<=0) return;
+
+    // Subtle distance fog makes the far end recede naturally.
+    const z=(player.y/CELL)-(y+.5);
+    const fog=Math.max(0,Math.min(1,z/TP_VIEW_AHEAD));
+    const parity=(x+y)&1;
+    const col=parity ? '#11182e' : '#151d37';
+
+    poly([q.a,q.b,q.c,q.d],col,'rgba(82,105,175,0.24)');
+
+    // Fine floor-grid highlight gives the floor a physical tiled surface.
+    ctx.strokeStyle=`rgba(104,126,194,${0.12*(1-fog*.65)})`;
+    ctx.lineWidth=Math.max(.5,q.a.scale*.008);
+    ctx.beginPath();
+    ctx.moveTo(q.a.x,q.a.y);ctx.lineTo(q.b.x,q.b.y);
+    ctx.moveTo(q.a.x,q.a.y);ctx.lineTo(q.d.x,q.d.y);
+    ctx.stroke();
+  }
+
+  function drawWall(x,y){
+    const q=groundQuad(x,y);
+    if(q.a.depth<=0||q.b.depth<=0||q.c.depth<=0||q.d.depth<=0) return;
+
+    const top = [
+      thirdProject(x*CELL,y*CELL,TP_WALL_HEIGHT),
+      thirdProject((x+1)*CELL,y*CELL,TP_WALL_HEIGHT),
+      thirdProject((x+1)*CELL,(y+1)*CELL,TP_WALL_HEIGHT),
+      thirdProject(x*CELL,(y+1)*CELL,TP_WALL_HEIGHT)
+    ];
+    const [at,bt,ct,dt]=top;
+
+    // A subtle ground shadow anchors each block.
+    poly([
+      {x:q.a.x+3,y:q.a.y},{x:q.b.x+3,y:q.b.y},
+      {x:q.c.x+7,y:q.c.y+5},{x:q.d.x-7,y:q.d.y+5}
+    ],'rgba(0,0,0,.22)');
+
+    // Front face (toward the player).
+    const frontGrad=ctx.createLinearGradient(0,q.d.y,0,dt.y);
+    frontGrad.addColorStop(0,'#080d1c');
+    frontGrad.addColorStop(1,'#121a30');
+    poly([q.d,q.c,ct,dt],frontGrad,'rgba(65,83,140,.36)');
+
+    // Right face.
+    const rightGrad=ctx.createLinearGradient(q.b.x,0,bt.x,0);
+    rightGrad.addColorStop(0,'#0b1122');
+    rightGrad.addColorStop(1,'#151f3a');
+    poly([q.b,q.c,ct,bt],rightGrad,'rgba(72,91,148,.32)');
+
+    // Left face.
+    poly([q.a,q.d,dt,at],'#0c1325','rgba(55,73,125,.30)');
+
+    // Top face — deliberately brighter to sell the 3D volume.
+    const topGrad=ctx.createLinearGradient(at.x,at.y,ct.x,ct.y);
+    topGrad.addColorStop(0,'#34436f');
+    topGrad.addColorStop(.55,'#2a385f');
+    topGrad.addColorStop(1,'#202d50');
+    poly([at,bt,ct,dt],topGrad,'rgba(126,151,221,.42)');
+
+    // Bright upper rim.
+    ctx.strokeStyle='rgba(151,171,232,.34)';
+    ctx.lineWidth=Math.max(.7,at.scale*.012);
+    ctx.beginPath();
+    ctx.moveTo(at.x,at.y);ctx.lineTo(bt.x,bt.y);
+    ctx.lineTo(ct.x,ct.y);ctx.lineTo(dt.x,dt.y);
+    ctx.stroke();
+
+    // A tiny vertical edge highlight adds the "solid block" look.
+    ctx.strokeStyle='rgba(110,132,198,.20)';
+    ctx.beginPath();
+    ctx.moveTo(q.d.x,q.d.y);ctx.lineTo(dt.x,dt.y);
+    ctx.moveTo(q.c.x,q.c.y);ctx.lineTo(ct.x,ct.y);
+    ctx.stroke();
+  }
+
+  function drawCharacter(x,y,r,color,phase,bounce,alpha,kind='player'){
+    ctx.globalAlpha=alpha===undefined?1:alpha;
+    const p=thirdProject(x,y,0);
+    if(p.scale<=0){ctx.globalAlpha=1;return;}
+
+    // r is the logical collision radius in world pixels. Convert to a
+    // perspective-sized person. The old renderer used a floating sphere;
+    // this renderer deliberately builds a small low-poly 3D character.
+    const worldRadius = r / CELL;
+    const unit = Math.max(1.5, worldRadius*p.scale*0.72);
+    const u = unit;
+    const bob=bounce ? -Math.abs(Math.sin(phase))*u*.055 : 0;
+    const legSwing=bounce ? Math.sin(phase)*u*.16 : 0;
+
+    // Ground contact shadow.
+    ctx.fillStyle='rgba(0,0,0,.50)';
+    ctx.beginPath();
+    ctx.ellipse(p.x,p.y+u*.05,u*.72,u*.18,0,0,Math.PI*2);
+    ctx.fill();
+
+    const isCop = kind==='cop';
+    const bodyColor = color;
+    const dark = shade(bodyColor,-35);
+    const light = shade(bodyColor,42);
+
+    // Legs: two separate solid forms, giving the figure an actual stance.
+    ctx.lineCap='round';
+    ctx.lineWidth=Math.max(1,u*.17);
+    ctx.strokeStyle=dark;
+    ctx.beginPath();
+    ctx.moveTo(p.x-u*.22,p.y+u*.55+bob);
+    ctx.lineTo(p.x-u*.25+legSwing,p.y+u*1.02);
+    ctx.moveTo(p.x+u*.22,p.y+u*.55+bob);
+    ctx.lineTo(p.x+u*.25-legSwing,p.y+u*1.02);
+    ctx.stroke();
+
+    // Torso as a tapered polygon instead of an ellipse.
+    const topY=p.y+u*.18+bob, botY=p.y+u*.66+bob;
+    poly([
+      {x:p.x-u*.36,y:topY}, {x:p.x+u*.36,y:topY},
+      {x:p.x+u*.30,y:botY}, {x:p.x-u*.30,y:botY}
+    ], ctx.createLinearGradient(p.x-u*.35,0,p.x+u*.35,0));
+    // Refill the gradient correctly (poly only receives a style object).
+    const torsoG=ctx.createLinearGradient(p.x-u*.4,topY,p.x+u*.4,botY);
+    torsoG.addColorStop(0,dark); torsoG.addColorStop(.48,light); torsoG.addColorStop(1,dark);
+    poly([
+      {x:p.x-u*.36,y:topY}, {x:p.x+u*.36,y:topY},
+      {x:p.x+u*.30,y:botY}, {x:p.x-u*.30,y:botY}
+    ],torsoG,'rgba(255,255,255,.10)');
+
+    // Arms, hanging slightly away from the body.
+    ctx.strokeStyle=dark;
+    ctx.lineWidth=Math.max(1,u*.13);
+    ctx.beginPath();
+    ctx.moveTo(p.x-u*.33,p.y+u*.24+bob);
+    ctx.lineTo(p.x-u*.50,p.y+u*.62+bob+legSwing*.35);
+    ctx.moveTo(p.x+u*.33,p.y+u*.24+bob);
+    ctx.lineTo(p.x+u*.50,p.y+u*.62+bob-legSwing*.35);
+    ctx.stroke();
+
+    // Head: shaded sphere with a small rim highlight.
+    const headR=u*.40;
+    const headY=p.y-u*.12+bob;
+    const headG=ctx.createRadialGradient(
+      p.x-headR*.32,headY-headR*.38,Math.max(1,headR*.05),
+      p.x+headR*.10,headY+headR*.12,headR*1.08
+    );
+    headG.addColorStop(0,shade(bodyColor,58));
+    headG.addColorStop(.48,bodyColor);
+    headG.addColorStop(1,shade(bodyColor,-28));
+    ctx.fillStyle=headG;
+    ctx.beginPath();ctx.arc(p.x,headY,headR,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,.13)';ctx.lineWidth=Math.max(.5,u*.045);ctx.stroke();
+
+    if(isCop){
+      // Simple police cap and badge-like chest accent. This is intentionally
+      // stylized so it remains readable at distance and works without assets.
+      ctx.fillStyle='#17233f';
+      ctx.beginPath();
+      ctx.ellipse(p.x,headY-headR*.72,headR*.88,headR*.23,0,Math.PI,Math.PI*2);
+      ctx.fill();
+      ctx.fillRect(p.x-headR*.55,headY-headR*.88,headR*1.1,headR*.16);
+      ctx.fillStyle='#f6c453';
+      ctx.beginPath();ctx.arc(p.x,p.y+u*.32+bob,Math.max(.7,u*.07),0,Math.PI*2);ctx.fill();
+    } else {
+      // Small backpack/shoulder highlight makes the thief read as a person
+      // seen from behind rather than a colored orb.
+      ctx.fillStyle=shade(bodyColor,-48);
+      ctx.fillRect(p.x-u*.25,p.y+u*.25+bob,u*.50,u*.22);
+    }
+
+    ctx.globalAlpha=1;
+  }
+
+  function drawDoor(x,y,locked){
+    const q=groundQuad(x,y);
+    const pulse=.5+.5*Math.sin(performance.now()/250);
+    const h=1.15;
+    const at=thirdProject(x*CELL,y*CELL,h);
+    const bt=thirdProject((x+1)*CELL,y*CELL,h);
+
+    poly([q.a,q.b,bt,at],
+      locked ? `rgba(120,90,150,${.18+.06*pulse})`
+             : `rgba(192,132,252,${.35+.18*pulse})`,
+      'rgba(192,132,252,.48)');
+  }
+
+  // Traps are rendered as physical 3D floor objects, not floating icons.
+  function trapQuad(x,y,h=0){
+    return [
+      thirdProject(x*CELL,y*CELL,h),
+      thirdProject((x+1)*CELL,y*CELL,h),
+      thirdProject((x+1)*CELL,(y+1)*CELL,h),
+      thirdProject(x*CELL,(y+1)*CELL,h)
+    ];
+  }
+
+  function drawTrap(t,ti){
+    const iceState=roomIceMelted[roomIndex];
+    if(t.type==='ice'&&iceState[ti]) return;
+
+    const q=trapQuad(t.x,t.y,0.015);
+    if(q.some(p=>p.depth<=0)) return;
+
+    // A subtle dark footprint makes every hazard feel physically attached to the floor.
+    poly([
+      {x:q[0].x+2,y:q[0].y+2},{x:q[1].x-2,y:q[1].y+2},
+      {x:q[2].x-2,y:q[2].y+2},{x:q[3].x+2,y:q[3].y+2}
+    ],'rgba(0,0,0,.28)');
+
+    if(t.type==='ice'){
+      // Thick translucent ice sheet with blue edge, cracks and a cold glow.
+      const top=trapQuad(t.x,t.y,0.08);
+      const low=trapQuad(t.x,t.y,0.0);
+      const iceGrad=ctx.createLinearGradient(top[0].x,top[0].y,top[2].x,top[2].y);
+      iceGrad.addColorStop(0,'rgba(170,225,255,.34)');
+      iceGrad.addColorStop(.5,'rgba(92,174,255,.22)');
+      iceGrad.addColorStop(1,'rgba(55,112,220,.30)');
+      poly([top[0],top[1],top[2],top[3]],iceGrad,'rgba(145,220,255,.72)');
+
+      // Thin visible side thickness.
+      poly([low[3],low[2],top[2],top[3]],'rgba(70,125,210,.20)','rgba(120,195,255,.30)');
+
+      // Cracked surface.
+      ctx.save();
+      ctx.strokeStyle='rgba(205,245,255,.70)';
+      ctx.lineWidth=Math.max(.7,top[0].scale*.010);
+      const cx=(top[0].x+top[2].x)/2, cy=(top[0].y+top[2].y)/2;
+      ctx.beginPath();
+      ctx.moveTo(cx-10,cy-7);ctx.lineTo(cx-2,cy);ctx.lineTo(cx-8,cy+9);
+      ctx.moveTo(cx-2,cy);ctx.lineTo(cx+9,cy-5);ctx.moveTo(cx-2,cy);ctx.lineTo(cx+7,cy+8);
+      ctx.stroke();
+      ctx.restore();
       return;
     }
-    // extruded 3D block: top diamond raised by WALL_H, plus the two front-facing side walls
-    const top = { top:{x:d.top.x,y:d.top.y-WALL_H}, right:{x:d.right.x,y:d.right.y-WALL_H},
-                  bottom:{x:d.bottom.x,y:d.bottom.y-WALL_H}, left:{x:d.left.x,y:d.left.y-WALL_H} };
-    ctx.fillStyle='#171a26'; // right face (base-right -> base-bottom -> top-bottom -> top-right)
-    ctx.beginPath(); ctx.moveTo(d.right.x,d.right.y); ctx.lineTo(d.bottom.x,d.bottom.y);
-    ctx.lineTo(top.bottom.x,top.bottom.y); ctx.lineTo(top.right.x,top.right.y); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#0f1119'; // left face (base-left -> base-bottom -> top-bottom -> top-left)
-    ctx.beginPath(); ctx.moveTo(d.left.x,d.left.y); ctx.lineTo(d.bottom.x,d.bottom.y);
-    ctx.lineTo(top.bottom.x,top.bottom.y); ctx.lineTo(top.left.x,top.left.y); ctx.closePath(); ctx.fill();
-    fillDiamond(top, '#3a4166'); // top face, brightest - reads as the lit surface
+
+    if(t.type==='fire'){
+      // Burnt floor plate.
+      const top=trapQuad(t.x,t.y,0.045);
+      const fireGrad=ctx.createRadialGradient(
+        (top[0].x+top[2].x)/2,(top[0].y+top[2].y)/2,1,
+        (top[0].x+top[2].x)/2,(top[0].y+top[2].y)/2,Math.max(8,top[0].scale*.75)
+      );
+      fireGrad.addColorStop(0,'rgba(255,195,55,.82)');
+      fireGrad.addColorStop(.42,'rgba(255,92,25,.60)');
+      fireGrad.addColorStop(1,'rgba(150,35,20,.12)');
+      poly([top[0],top[1],top[2],top[3]],fireGrad,'rgba(255,113,42,.42)');
+
+      // Several low-poly flame tongues rising from the floor.
+      const centerX=(t.x+.5)*CELL, centerY=(t.y+.5)*CELL;
+      const flames=[
+        {dx:-.22,dy:.08,h:.58,w:.18},
+        {dx:.02,dy:-.05,h:.82,w:.23},
+        {dx:.25,dy:.10,h:.52,w:.17}
+      ];
+      flames.forEach((f,i)=>{
+        const bx=(centerX+f.dx*CELL), by=(centerY+f.dy*CELL);
+        const base=thirdProject(bx,by,0.06);
+        const l=thirdProject(bx,by,f.h);
+        const left=thirdProject(bx-f.w*CELL,by,0.06);
+        const right=thirdProject(bx+f.w*CELL,by,0.06);
+        const inner=shade('#ff8c42',i===1?38:18);
+        poly([
+          {x:left.x,y:left.y},{x:base.x,y:base.y},
+          {x:right.x,y:right.y},{x:l.x,y:l.y}
+        ],i===1?'rgba(255,180,35,.95)':'rgba(255,91,25,.88)','rgba(255,190,65,.38)');
+        // Small bright inner tongue.
+        const il=thirdProject(bx-f.w*.38*CELL,by,0.08);
+        const ir=thirdProject(bx+f.w*.38*CELL,by,0.08);
+        poly([{x:il.x,y:il.y},{x:ir.x,y:ir.y},{x:l.x,y:l.y+Math.max(1,l.scale*.04)}],inner);
+      });
+      return;
+    }
+
+    // SPIKES: four physical 3D pyramidal spikes embedded in the floor.
+    const offsets=[[-.25,-.25],[.25,-.25],[-.25,.25],[.25,.25]];
+    offsets.forEach(([ox,oy],i)=>{
+      const bx=(t.x+.5+ox)*CELL, by=(t.y+.5+oy)*CELL;
+      const half=.13*CELL;
+      const b0=thirdProject(bx-half,by-half,0.03);
+      const b1=thirdProject(bx+half,by-half,0.03);
+      const b2=thirdProject(bx+half,by+half,0.03);
+      const b3=thirdProject(bx-half,by+half,0.03);
+      const tip=thirdProject(bx,by,0.62);
+      poly([b0,b1,tip],'#a91f45','rgba(255,110,135,.65)');
+      poly([b1,b2,tip],'#6f1833','rgba(255,110,135,.42)');
+      poly([b2,b3,tip],'#4b1228','rgba(255,90,120,.30)');
+      poly([b3,b0,tip],'#861b3d','rgba(255,100,130,.45)');
+      poly([b0,b1,b2,b3],'rgba(80,12,30,.45)','rgba(255,77,109,.30)');
+    });
   }
 
-  function render(renderEchoPositions, keyPos){
+  function render(renderEchoPositions,keyPos){
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.save();
-    ctx.translate(canvas.width*0.32-camera.x, canvas.height/2.6-camera.y);
 
-    const items = [];
-    for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++){
-      items.push({ k:x+y-0.4, fn:()=>drawIsoTile(x,y, room.grid[y][x]===1) });
+    // Deep space background.
+    const bg=ctx.createLinearGradient(0,0,0,canvas.height);
+    bg.addColorStop(0,'#020307');
+    bg.addColorStop(.18,'#050817');
+    bg.addColorStop(.62,'#070b18');
+    bg.addColorStop(1,'#03050a');
+    ctx.fillStyle=bg;ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // Horizon haze.
+    const horizon=canvas.height*.20;
+    const hg=ctx.createRadialGradient(
+      canvas.width*.5,horizon,2,
+      canvas.width*.5,horizon,canvas.width*.75
+    );
+    hg.addColorStop(0,'rgba(83,104,184,.22)');
+    hg.addColorStop(.45,'rgba(45,59,115,.08)');
+    hg.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=hg;ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    const cells=[];
+    const minY=Math.max(0,Math.floor(player.y/CELL)-TP_VIEW_AHEAD-2);
+    const maxY=Math.min(ROWS-1,Math.floor(player.y/CELL)+TP_VIEW_BEHIND+2);
+
+    for(let y=minY;y<=maxY;y++){
+      const depth=(player.y/CELL)-(y+.5);
+      if(depth < -TP_VIEW_BEHIND || depth > TP_VIEW_AHEAD) continue;
+      for(let x=0;x<COLS;x++) cells.push({x,y,depth});
     }
-    const isDoorIn=(x,y)=>x===room.doorIn.x&&y===room.doorIn.y, isDoorOut=(x,y)=>x===room.doorOut.x&&y===room.doorOut.y;
-    [room.doorIn, room.doorOut].forEach(dc=>{
-      items.push({ k:dc.x+dc.y-0.2, fn:()=>{
-        const locked = isDoorOut(dc.x,dc.y) && !hasKeyThisAttempt;
-        const pulse=0.5+0.5*Math.sin(performance.now()/250);
-        const d=isoDiamond(dc.x+0.5,dc.y+0.5, ISO_W*0.7, ISO_H*0.7);
-        fillDiamond(d, locked?'rgba(120,90,150,0.4)':`rgba(192,132,252,${0.35+0.3*pulse})`);
-      }});
+    // Far first, near last = natural occlusion.
+    cells.sort((a,b)=>b.depth-a.depth);
+
+    for(const c of cells){
+      if(room.grid[c.y][c.x]===1) drawWall(c.x,c.y);
+      else drawFloorTile(c.x,c.y);
+    }
+
+    const obj=[];
+    const addDepth=(x,y,fn)=>obj.push({
+      depth:(player.y-y)/CELL,
+      fn
     });
-    const iceState = roomIceMelted[roomIndex];
+
+    addDepth(room.doorIn.x*CELL,room.doorIn.y*CELL,
+      ()=>drawDoor(room.doorIn.x,room.doorIn.y,false));
+    addDepth(room.doorOut.x*CELL,room.doorOut.y*CELL,
+      ()=>drawDoor(room.doorOut.x,room.doorOut.y,!hasKeyThisAttempt));
+
     room.trapCells.forEach((t,ti)=>{
-      if(t.type==='ice' && iceState[ti]) return;
-      items.push({ k:t.x+t.y-0.1, fn:()=>{
-        const p=isoProject((t.x+0.5)*CELL,(t.y+0.5)*CELL);
-        ctx.font='14px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        if(t.type==='spike'){
-          ctx.strokeStyle='rgba(255,77,109,0.85)'; ctx.lineWidth=2;
-          ctx.beginPath(); ctx.moveTo(p.x-6,p.y-6); ctx.lineTo(p.x+6,p.y+6); ctx.moveTo(p.x+6,p.y-6); ctx.lineTo(p.x-6,p.y+6); ctx.stroke();
-        } else if(t.type==='fire'){ ctx.fillText('🔥', p.x, p.y); }
-        else { ctx.fillText('❄️', p.x, p.y); }
-      }});
+      addDepth((t.x+.5)*CELL,(t.y+.5)*CELL,()=>drawTrap(t,ti));
     });
-    for(const m of (roomArrestMarkers[roomIndex]||[])){
-      items.push({ k:m.x/CELL+m.y/CELL+0.3, fn:()=>{ const p=isoProject(m.x,m.y); drawCharacter(p.x,p.y,PLAYER_R,'#4fd1c5',0,false,0.12); } });
-    }
-    if(!hasKeyThisAttempt){
-      items.push({ k:keyPos.x/CELL+keyPos.y/CELL+0.35, fn:()=>{
-        const p=isoProject(keyPos.x,keyPos.y); const bob=Math.sin(performance.now()/220)*3;
-        ctx.font='15px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText('🔑', p.x, p.y-14+bob);
-      }});
-    }
-    for(const p of playerTrail){
-      items.push({ k:p.x/CELL+p.y/CELL+0.35, fn:()=>{
-        const ip=isoProject(p.x,p.y);
-        ctx.fillStyle=`rgba(79,209,197,${0.25*p.a})`;
-        ctx.beginPath(); ctx.arc(ip.x,ip.y,PLAYER_R*0.6,0,7); ctx.fill();
-      }});
-    }
-    for(const e of renderEchoPositions){
-      items.push({ k:e.x/CELL+e.y/CELL+0.5, fn:()=>{
-        const p=isoProject(e.x,e.y);
-        const col = e.fire?'#ff8c42':e.stunned?'#93c5fd':'#4fd1c5';
-        drawCharacter(p.x,p.y,PLAYER_R,col,0,false,0.6);
-        if(e.stunned||e.fire){ ctx.font='10px system-ui'; ctx.textAlign='center'; ctx.fillStyle=e.fire?'#ff8c42':'#93c5fd'; ctx.fillText(e.fire?'🔥':'❄️', p.x, p.y-16); }
-      }});
-    }
-    const lenient = roomFirstAttempt[roomIndex];
-    items.push({ k:cop.x/CELL+cop.y/CELL+0.5, fn:()=>{
-      const p=isoProject(cop.x,cop.y);
-      const col = cop.slowTimer>0?'#93c5fd':lenient?'#6b7280':(cop.state==='predict'?'#f6c453':'#ff4d6d');
-      drawCharacter(p.x,p.y,COP_R,col,performance.now()/120,true,1);
-    }});
-    items.push({ k:player.x/CELL+player.y/CELL+0.6, fn:()=>{
-      const p=isoProject(player.x,player.y);
-      const col = playerFireTimer>0?'#ff8c42':playerStunTimer>0?'#93c5fd':'#4fd1c5';
-      if(playerStunTimer>0||playerFireTimer>0){ ctx.font='11px system-ui'; ctx.textAlign='center'; ctx.fillStyle=playerFireTimer>0?'#ff8c42':'#93c5fd'; ctx.fillText(playerFireTimer>0?'🔥':'❄️', p.x, p.y-17); }
-      drawCharacter(p.x,p.y,PLAYER_R,col,playerPhase,playerStunTimer<=0,1);
-    }});
-    for(const pt of particles){
-      items.push({ k:pt.x/CELL+pt.y/CELL+0.7, fn:()=>{
-        const p=isoProject(pt.x,pt.y);
-        ctx.globalAlpha=Math.max(0,1-pt.age/pt.life);
-        ctx.fillStyle=pt.color; ctx.fillRect(p.x-2,p.y-2,4,4);
-        ctx.globalAlpha=1;
-      }});
-    }
-    items.sort((a,b)=>a.k-b.k);
-    for(const it of items) it.fn();
 
-    ctx.restore();
-    const vg=ctx.createRadialGradient(canvas.width/2,canvas.height/2,canvas.height*0.25,canvas.width/2,canvas.height/2,canvas.height*0.75);
-    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,0.4)');
-    ctx.fillStyle=vg; ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(!hasKeyThisAttempt){
+      addDepth(keyPos.x,keyPos.y,()=>{
+        const p=thirdProject(keyPos.x,keyPos.y,0);
+        const bob=Math.sin(performance.now()/220)*4;
+        ctx.font=`${Math.max(10,17*p.scale/100)}px system-ui`;
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.shadowColor='#f6c453';ctx.shadowBlur=Math.max(4,p.scale/16);
+        ctx.fillText('🔑',p.x,p.y-18+bob);
+        ctx.shadowBlur=0;
+      });
+    }
+
+    for(const m of (roomArrestMarkers[roomIndex]||[]))
+      addDepth(m.x,m.y,()=>drawCharacter(m.x,m.y,PLAYER_R,'#4fd1c5',0,false,.12,'player'));
+
+    for(const p of playerTrail)
+      addDepth(p.x,p.y,()=>{
+        const ip=thirdProject(p.x,p.y,0);
+        ctx.fillStyle=`rgba(79,209,197,${.25*p.a})`;
+        ctx.beginPath();ctx.arc(ip.x,ip.y,Math.max(1,PLAYER_R*.30*ip.scale/100),0,Math.PI*2);ctx.fill();
+      });
+
+    for(const e of renderEchoPositions){
+      addDepth(e.x,e.y,()=>{
+        const col=e.fire?'#ff8c42':e.stunned?'#93c5fd':'#4fd1c5';
+        drawCharacter(e.x,e.y,PLAYER_R,col,0,false,.60,'player');
+        if(e.stunned||e.fire){
+          const p=thirdProject(e.x,e.y,0);
+          ctx.font=`${Math.max(9,11*p.scale/100)}px system-ui`;
+          ctx.textAlign='center';
+          ctx.fillStyle=e.fire?'#ff8c42':'#93c5fd';
+          ctx.fillText(e.fire?'🔥':'❄️',p.x,p.y-18);
+        }
+      });
+    }
+
+    const lenient=roomFirstAttempt[roomIndex];
+    addDepth(cop.x,cop.y,()=>{
+      const col=cop.slowTimer>0?'#93c5fd':
+        lenient?'#6b7280':
+        (cop.state==='predict'?'#f6c453':'#ff4d6d');
+      drawCharacter(cop.x,cop.y,COP_R,col,performance.now()/120,true,1,'cop');
+    });
+
+    // Current player is always foreground.
+    addDepth(player.x,player.y,()=>{
+      const col=playerFireTimer>0?'#ff8c42':
+        playerStunTimer>0?'#93c5fd':'#4fd1c5';
+      const p=thirdProject(player.x,player.y,0);
+      if(playerStunTimer>0||playerFireTimer>0){
+        ctx.font='11px system-ui';ctx.textAlign='center';
+        ctx.fillStyle=playerFireTimer>0?'#ff8c42':'#93c5fd';
+        ctx.fillText(playerFireTimer>0?'🔥':'❄️',p.x,p.y-22);
+      }
+      drawCharacter(player.x,player.y,PLAYER_R,col,playerPhase,playerStunTimer<=0,1,'player');
+    });
+
+    for(const pt of particles)
+      addDepth(pt.x,pt.y,()=>{
+        const p=thirdProject(pt.x,pt.y,0);
+        ctx.globalAlpha=Math.max(0,1-pt.age/pt.life);
+        ctx.fillStyle=pt.color;
+        const r=Math.max(1,2*p.scale/100);
+        ctx.fillRect(p.x-r,p.y-r,r*2,r*2);
+        ctx.globalAlpha=1;
+      });
+
+    obj.sort((a,b)=>b.depth-a.depth);
+    for(const it of obj) it.fn();
+
+    // PLAYER FOREGROUND PASS:
+    // The camera sits behind the player, so the entry wall can be physically
+    // closer to the camera than the player.  The player must nevertheless
+    // remain visible as the main avatar, exactly like a third-person runner.
+    // Draw the player one final time after all world geometry/objects.
+    {
+      const col=playerFireTimer>0?'#ff8c42':
+        playerStunTimer>0?'#93c5fd':'#4fd1c5';
+      drawCharacter(player.x,player.y,PLAYER_R,col,playerPhase,playerStunTimer<=0,1,'player');
+      const pp=thirdProject(player.x,player.y,0);
+      if(playerStunTimer>0||playerFireTimer>0){
+        ctx.font='11px system-ui';ctx.textAlign='center';
+        ctx.fillStyle=playerFireTimer>0?'#ff8c42':'#93c5fd';
+        ctx.fillText(playerFireTimer>0?'🔥':'❄️',pp.x,pp.y-22);
+      }
+    }
+
+    // Subtle screen vignette.
+    const vg=ctx.createRadialGradient(
+      canvas.width/2,canvas.height*.58,canvas.height*.22,
+      canvas.width/2,canvas.height*.58,canvas.height*.90
+    );
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(1,'rgba(0,0,0,.56)');
+    ctx.fillStyle=vg;ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // Thin atmospheric horizon line.
+    ctx.fillStyle='rgba(111,132,199,.10)';
+    ctx.fillRect(0,horizon,canvas.width,1);
   }
 
   function showScreen(id){
@@ -967,44 +1425,42 @@
   }
 
   function makeTutorialRoom(stage){
-    // per-stage playable patch size (height x width), centered in the full grid
-    const dims = {1:{h:3,w:8}, 2:{h:5,w:10}, 3:{h:9,w:12}}[stage];
-    const h=dims.h, w=dims.w;
-    const midY = Math.floor(ROWS/2), midX = Math.floor(COLS/2);
-    const top = midY - Math.floor(h/2), left = midX - Math.floor(w/2);
-    const bottom = top+h-1, right = left+w-1;
-    const midRowY = top + Math.floor(h/2);
-    const grid=[];
-    for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
-    let doorIn={x:left, y:midRowY}, doorOut={x:right, y:midRowY};
-    let trapCells=[], keyCell=doorOut, copSpawn={x:right-1,y:top};
+    const dims={1:{h:6,w:5},2:{h:10,w:6},3:{h:18,w:7}}[stage];
+    const h=dims.h,w=dims.w;
+    const left=Math.floor((COLS-w)/2), top=ROWS-h-2, right=left+w-1, bottom=top+h-1;
+    const grid=[]; for(let y=0;y<ROWS;y++) grid.push(new Array(COLS).fill(1));
 
-    if(stage===2){
-      // a real hand-built 2-wide lane structure (not an open field) so traps genuinely force a
-      // lane swap: upper band -> a 2-wide vertical bridge -> lower band
-      doorIn={x:left, y:top}; doorOut={x:right, y:bottom};
-      for(let y=top; y<=top+1; y++) for(let x=left; x<=left+5; x++) grid[y][x]=0; // band A
-      for(let y=top; y<=bottom; y++) for(let x=left+5; x<=left+6; x++) grid[y][x]=0; // bridge
-      for(let y=bottom-1; y<=bottom; y++) for(let x=left+5; x<=right; x++) grid[y][x]=0; // band B
-      keyCell = {x:left+3, y:top+1};
-      trapCells = [
-        {x:left+2, y:top, type:'spike'},
-        {x:left+4, y:top+1, type:'fire'},
-        {x:left+7, y:bottom-1, type:'ice'},
-        {x:left+8, y:bottom, type:'spike'}
+    let doorIn={x:left+Math.floor(w/2),y:bottom};
+    let doorOut={x:left+Math.floor(w/2),y:top};
+    let trapCells=[],keyCell=doorOut,copSpawn={x:right-1,y:top+3};
+
+    // Long tutorial corridor with a couple of lane changes.
+    for(let y=top;y<=bottom;y++){
+      const lane=(y>top+2 && y<bottom-2 && (y%5===0)) ? left+1 : left+Math.floor(w/2);
+      for(let x=Math.max(left,lane-1);x<=Math.min(right,lane+1);x++) grid[y][x]=0;
+    }
+
+    if(stage>=2){
+      keyCell={x:left+1,y:bottom-3};
+      trapCells=[
+        {x:left+Math.floor(w/2),y:bottom-5,type:'spike'},
+        {x:left+Math.floor(w/2)+1,y:top+7,type:'fire'},
+        {x:left+Math.floor(w/2)-1,y:top+3,type:'ice'}
       ];
-    } else {
-      for(let y=top;y<=bottom;y++) for(let x=left;x<=right;x++) grid[y][x]=0;
     }
     if(stage===3){
-      keyCell = {x:left+4, y:bottom};
-      copSpawn = {x:right-2, y:top};
+      copSpawn={x:left+Math.floor(w/2),y:top+5};
+      // Ensure a wider section where the player can learn to bait the cop.
+      for(let y=top+6;y<top+11;y++) for(let x=left;x<=right;x++) grid[y][x]=0;
     }
-    return {
-      grid, doorIn, doorOut, keyCell, trapCells,
-      patrol:[{x:left+1,y:top},{x:right-1,y:top},{x:left+1,y:bottom},{x:right-1,y:bottom}],
-      copSpawn
-    };
+
+    const patrol=[
+      {x:left+1,y:bottom-2},
+      {x:right-1,y:Math.floor((top+bottom)/2)},
+      {x:left+1,y:top+3},
+      {x:right-1,y:top+1}
+    ];
+    return {grid,doorIn,doorOut,keyCell,trapCells,patrol,copSpawn};
   }
 
   function enterTutorial(stage){
